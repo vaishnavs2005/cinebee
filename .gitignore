@@ -1,8 +1,1 @@
-node_modules
-client/node_modules
-server/node_modules
-dist
-client/dist
-.env
-.DS_Store
-*.log
+# Empty gitignore to track all files as requested
