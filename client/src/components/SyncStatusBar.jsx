@@ -1,8 +1,8 @@
 import React from 'react';
-import { RotateCw, CheckCircle2, AlertCircle, FileVideo, Clock } from 'lucide-react';
+import { RotateCw, CheckCircle2, AlertCircle, FileVideo, Clock, Upload } from 'lucide-react';
 
 function formatDuration(sec) {
-  if (!sec || isNaN(sec)) return '0:00';
+  if (!sec || !isFinite(sec) || sec < 0) return '0:00';
   const mins = Math.floor(sec / 60);
   const secs = Math.floor(sec % 60);
   return `${mins}m ${secs.toString().padStart(2, '0')}s`;
@@ -15,8 +15,12 @@ export default function SyncStatusBar({
   myFileInfo,
   partnerPresent,
   onManualResync,
+  onChangeVideo,
 }) {
-  const getSyncStatus = () => {
+  const status = getSyncStatus();
+  const StatusIcon = status.icon;
+
+  function getSyncStatus() {
     if (!isConnected) {
       return { text: 'Disconnected', color: 'var(--status-error)', icon: AlertCircle };
     }
@@ -27,10 +31,7 @@ export default function SyncStatusBar({
       return { text: `Correcting drift (${drift.toFixed(1)}s)`, color: 'var(--status-syncing)', icon: RotateCw };
     }
     return { text: `In Sync (±${Math.abs(drift).toFixed(2)}s)`, color: 'var(--status-connected)', icon: CheckCircle2 };
-  };
-
-  const status = getSyncStatus();
-  const StatusIcon = status.icon;
+  }
 
   return (
     <div className="stage-footer">
@@ -53,6 +54,17 @@ export default function SyncStatusBar({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {onChangeVideo && (
+          <button
+            onClick={onChangeVideo}
+            className="resync-btn change-video-footer-btn"
+            title="Choose a different video file"
+          >
+            <Upload size={13} />
+            <span>Change Video</span>
+          </button>
+        )}
+
         <button
           onClick={onManualResync}
           className="resync-btn"

@@ -66,7 +66,7 @@ function getSanitizedUsers(room) {
 io.on('connection', (socket) => {
   let currentRoomId = null;
 
-  socket.on('join_room', ({ roomId, username }, callback) => {
+  socket.on('join_room', ({ roomId, username, mode }, callback) => {
     if (!roomId) {
       if (callback) callback({ error: 'Room ID is required' });
       return;
@@ -93,6 +93,10 @@ io.on('connection', (socket) => {
 
     const room = getOrCreateRoom(cleanRoomId);
     const isFirstUser = room.users.size === 0;
+
+    if (isFirstUser && (mode === 'host-only' || mode === 'co-op')) {
+      room.mode = mode;
+    }
 
     const userObj = {
       id: socket.id,

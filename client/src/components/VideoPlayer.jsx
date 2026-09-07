@@ -12,14 +12,19 @@ import {
   Subtitles,
   Film,
   Sparkles,
-  Sun
+  Sun,
+  Lock,
+  Shield,
+  Crown,
+  AlertTriangle
 } from 'lucide-react';
 import FloatingReactions from './FloatingReactions';
+import FullscreenChatOverlay from './FullscreenChatOverlay';
 import { generateSampleMovieBlob } from '../services/sampleVideoGenerator';
 import { processSubtitleFile } from '../services/subtitleHelper';
 
 function formatTime(seconds) {
-  if (isNaN(seconds) || seconds === null) return '00:00';
+  if (!isFinite(seconds) || seconds === null || seconds < 0) return '00:00';
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
@@ -37,6 +42,15 @@ export default function VideoPlayer({
   reactions = [],
   onShowToast,
   videoRefExternal,
+  messages = [],
+  currentUser,
+  isHost,
+  controlMode = 'co-op',
+  onToggleControlMode,
+  onRegisterChangeVideoTrigger,
+  onSendMessage,
+  onSendReaction,
+  onSeekToTime,
 }) {
   const localVideoRef = useRef(null);
   const videoRef = videoRefExternal || localVideoRef;
@@ -44,6 +58,8 @@ export default function VideoPlayer({
   const seekerRef = useRef(null);
   const fileInputRef = useRef(null);
   const subInputRef = useRef(null);
+  const sampleDurationRef = useRef(null);
+  const currentFileNameRef = useRef('Local Video');
 
   const [videoSrc, setVideoSrc] = useState(null);
   const [videoName, setVideoName] = useState(null);
@@ -56,6 +72,7 @@ export default function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [ambientGlow, setAmbientGlow] = useState(true);
   const [isGeneratingDemo, setIsGeneratingDemo] = useState(false);
+  const [videoError, setVideoError] = useState(null);
 
   // Seeker hover tooltip state
   const [hoverTime, setHoverTime] = useState(null);
@@ -65,20 +82,72 @@ export default function VideoPlayer({
   const [subtitleTrackUrl, setSubtitleTrackUrl] = useState(null);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
 
-  // Echo guard flag to avoid sending back events that were triggered programmatically
+  // Auto-hide controls after 5 seconds of inactivity
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const hideControlsTimerRef = useRef(null);
+  const isHoveringControlsRef = useRef(false);
+
+  // Register the external change video trigger callback
+  useEffect(() => {
+    if (onRegisterChangeVideoTrigger) {
+      onRegisterChangeVideoTrigger(() => {
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+          fileInputRef.current.click();
+        }
+      });
+    }
+  }, [onRegisterChangeVideoTrigger]);
+
+  const resetControlsTimer = useCallback(() => {
+    setControlsVisible(true);
+    if (hideControlsTimerRef.current) {
+      clearTimeout(hideControlsTimerRef.current);
+      hideControlsTimerRef.current = null;
+    }
+    if (isPlaying && !isHoveringControlsRef.current) {
+      hideControlsTimerRef.current = setTimeout(() => {
+        setControlsVisible(false);
+      }, 5000);
+    }
+  }, [isPlaying]);
+
+  const handleUserActivity = useCallback(() => {
+    resetControlsTimer();
+  }, [resetControlsTimer]);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      if (hideControlsTimerRef.current) {
+        clearTimeout(hideControlsTimerRef.current);
+        hideControlsTimerRef.current = null;
+      }
+      setControlsVisible(true);
+    } else {
+      resetControlsTimer();
+    }
+    return () => {
+      if (hideControlsTimerRef.current) {
+        clearTimeout(hideControlsTimerRef.current);
+      }
+    };
+  }, [isPlaying, resetControlsTimer]);
+
+  // Guard flag to prevent local DOM events from echo-triggering remote actions
   const isApplyingRemote = useRef(false);
 
   // Handle Loading Local Video File
   const handleFileSelect = useCallback((file) => {
     if (!file) return;
-    if (!file.type.startsWith('video/') && !file.name.match(/\.(mp4|webm|ogg|mkv|mov|m4v)$/i)) {
-      if (onShowToast) onShowToast('Please select a valid video file (.mp4, .mkv, .webm)');
-      return;
-    }
+
+    setVideoError(null);
+    sampleDurationRef.current = null;
+    currentFileNameRef.current = file.name;
 
     const objectUrl = URL.createObjectURL(file);
     setVideoSrc(objectUrl);
     setVideoName(file.name);
+    setIsPlaying(false);
 
     if (onShowToast) onShowToast(`Loaded: ${file.name}`);
   }, [onShowToast]);
@@ -104,11 +173,19 @@ export default function VideoPlayer({
   const handleGenerateSampleVideo = async () => {
     try {
       setIsGeneratingDemo(true);
-      if (onShowToast) onShowToast('Generating animated cinema test reel...');
-      const sample = await generateSampleMovieBlob(120, 'Cine Nightly Test Reel');
+      setVideoError(null);
+      if (onShowToast) onShowToast('Generating animated cinema test reel (1-2s)...');
+
+      const sample = await generateSampleMovieBlob(10, 'CineBee Cinema Reel');
+      sampleDurationRef.current = sample.duration;
+      currentFileNameRef.current = sample.name;
+
       setVideoSrc(sample.url);
       setVideoName(sample.name);
-      if (onShowToast) onShowToast('Test reel ready! Press play to test sync.');
+      setDuration(sample.duration);
+      setIsPlaying(false);
+
+      if (onShowToast) onShowToast('Cinema test reel ready! Press play to test sync.');
     } catch (err) {
       console.error('Failed to generate sample video:', err);
       if (onShowToast) onShowToast('Failed to generate sample reel');
@@ -134,11 +211,16 @@ export default function VideoPlayer({
   const handleLoadedMetadata = () => {
     const video = videoRef.current;
     if (!video) return;
-    const dur = video.duration || 0;
+    let dur = video.duration;
+    if (!isFinite(dur) || isNaN(dur) || dur <= 0) {
+      dur = sampleDurationRef.current || 0;
+    }
     setDuration(dur);
+    setVideoError(null);
+
     if (onMetadataLoaded) {
       onMetadataLoaded({
-        fileName: videoName || 'Local Video',
+        fileName: currentFileNameRef.current || videoName || 'Local Video',
         duration: dur,
         fileSize: 0,
       });
@@ -163,17 +245,37 @@ export default function VideoPlayer({
     }
   };
 
+  // Check if current user has permission to control playback
+  const canControlPlayback = controlMode === 'co-op' || isHost;
+
   // Play / Pause Local Trigger
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video || !videoSrc) return;
 
+    // Check host-only permission
+    if (!canControlPlayback) {
+      if (onShowToast) onShowToast('🔒 Host-Only Mode is active: Only the room host can control playback.');
+      return;
+    }
+
     if (video.paused) {
-      video.play().catch(console.error);
-      setIsPlaying(true);
-      if (!isApplyingRemote.current && onPlaybackAction) {
-        onPlaybackAction('play', video.currentTime);
-      }
+      video.play()
+        .then(() => {
+          setIsPlaying(true);
+          setVideoError(null);
+          if (!isApplyingRemote.current && onPlaybackAction) {
+            onPlaybackAction('play', video.currentTime);
+          }
+        })
+        .catch((err) => {
+          console.warn('Playback play() was blocked or failed:', err);
+          if (err.name === 'NotAllowedError') {
+            if (onShowToast) onShowToast('⚠️ Autoplay blocked by browser. Click video to play.');
+          } else {
+            setVideoError('Browser could not play this format. Please select an MP4 (H.264) or WebM file.');
+          }
+        });
     } else {
       video.pause();
       setIsPlaying(false);
@@ -188,7 +290,15 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video || !videoSrc) return;
 
-    const newTime = Math.max(0, Math.min(duration, video.currentTime + delta));
+    if (!canControlPlayback) {
+      if (onShowToast) onShowToast('🔒 Host-Only Mode is active: Only the room host can seek.');
+      return;
+    }
+
+    const maxDuration = isFinite(duration) && duration > 0 ? duration : (video.duration || 0);
+    const newTime = Math.max(0, Math.min(maxDuration, (video.currentTime || 0) + delta));
+    if (!isFinite(newTime)) return;
+
     video.currentTime = newTime;
     setCurrentTime(newTime);
 
@@ -201,11 +311,17 @@ export default function VideoPlayer({
   const handleSeekClick = (e) => {
     const video = videoRef.current;
     const seeker = seekerRef.current;
-    if (!video || !seeker || !duration) return;
+    if (!video || !seeker || !duration || !isFinite(duration) || duration <= 0) return;
+
+    if (!canControlPlayback) {
+      if (onShowToast) onShowToast('🔒 Host-Only Mode: Only the room host can seek.');
+      return;
+    }
 
     const rect = seeker.getBoundingClientRect();
     const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const targetTime = pos * duration;
+    if (!isFinite(targetTime)) return;
 
     video.currentTime = targetTime;
     setCurrentTime(targetTime);
@@ -252,14 +368,35 @@ export default function VideoPlayer({
     const container = containerRef.current;
     if (!container) return;
 
-    if (!document.fullscreenElement) {
-      container.requestFullscreen().catch(console.error);
-      setIsFullscreen(true);
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+      if (container.requestFullscreen) {
+        container.requestFullscreen().catch(console.error);
+      } else if (container.webkitRequestFullscreen) {
+        container.webkitRequestFullscreen();
+      }
     } else {
-      document.exitFullscreen().catch(console.error);
-      setIsFullscreen(false);
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(console.error);
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
     }
   };
+
+  // Sync fullscreen state with document events
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isNowFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      setIsFullscreen(isNowFullscreen);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   // Remote Action Handling (Applying peer's play/pause/seek)
   useEffect(() => {
@@ -276,26 +413,36 @@ export default function VideoPlayer({
       if (Math.abs(video.currentTime - targetTime) > 0.4) {
         video.currentTime = targetTime;
       }
-      video.play().catch(console.error);
-      setIsPlaying(true);
+      video.play()
+        .then(() => {
+          setIsPlaying(true);
+        })
+        .catch((err) => {
+          console.warn('Remote play blocked by browser:', err);
+          // If browser blocked sound autoplay, mute and resume
+          if (err.name === 'NotAllowedError') {
+            video.muted = true;
+            setIsMuted(true);
+            video.play().then(() => setIsPlaying(true)).catch(() => {});
+            if (onShowToast) onShowToast('🔇 Partner started playback (click unmute to enable audio)');
+          }
+        });
     } else if (remoteAction.type === 'pause') {
       video.currentTime = targetTime;
       video.pause();
       setIsPlaying(false);
     }
 
-    // Release guard after small debounce
     const t = setTimeout(() => {
       isApplyingRemote.current = false;
     }, 350);
 
     return () => clearTimeout(t);
-  }, [remoteAction]);
+  }, [remoteAction, onShowToast]);
 
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Ignore if user is typing in an input or textarea
       if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
 
       switch (e.code) {
@@ -322,31 +469,92 @@ export default function VideoPlayer({
         default:
           break;
       }
+      resetControlsTimer();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [videoSrc, isPlaying, duration, isMuted]);
+  }, [videoSrc, isPlaying, duration, isMuted, canControlPlayback, resetControlsTimer]);
+
+  const triggerOpenVideoPicker = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
 
   return (
     <div className="player-wrapper" onDrop={handleDrop} onDragOver={handleDragOver}>
       {/* Ambient backlight glow effect behind the player */}
       <div className={`ambient-glow ${!ambientGlow || !isPlaying ? 'dim' : ''}`} />
 
-      <div className="video-container" ref={containerRef}>
+      <div
+        className={`video-container ${!controlsVisible && isPlaying ? 'controls-hidden' : ''}`}
+        ref={containerRef}
+        onMouseMove={handleUserActivity}
+        onTouchStart={handleUserActivity}
+        onClick={handleUserActivity}
+      >
         {/* Floating Reactions Overlay */}
         <FloatingReactions reactions={reactions} />
 
-        {/* Video Element */}
-        {videoSrc ? (
+        {/* Fullscreen Interactive Chat Overlay */}
+        <FullscreenChatOverlay
+          isFullscreen={isFullscreen}
+          messages={messages}
+          currentUser={currentUser}
+          currentVideoTime={currentTime}
+          onSendMessage={onSendMessage}
+          onSendReaction={onSendReaction}
+          onSeekToTime={onSeekToTime}
+        />
+
+        {/* Top Header Bar inside Video Player */}
+        {videoSrc && !videoError && (
+          <div className={`player-top-bar ${controlsVisible || !isPlaying ? 'visible' : ''}`}>
+            <div className="player-file-info">
+              <Film size={15} color="#ff2a6d" />
+              <span className="player-file-name" title={videoName}>{videoName}</span>
+            </div>
+
+            <div className="player-top-actions">
+              {controlMode === 'host-only' && (
+                <div
+                  className={`player-mode-badge ${isHost ? 'host' : 'guest'}`}
+                  title={isHost ? 'You have full playback control' : 'Only the host can control playback'}
+                >
+                  {isHost ? <Crown size={13} color="#f59e0b" /> : <Lock size={13} color="#ff2a6d" />}
+                  <span>{isHost ? 'Host Controls Active' : 'Host-Only Mode (Locked)'}</span>
+                </div>
+              )}
+
+              <button
+                className="player-change-video-pill"
+                onClick={triggerOpenVideoPicker}
+                title="Choose a different video file"
+              >
+                <Upload size={13} />
+                <span>Change Video</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Video Element or Dropzone or Error View */}
+        {videoSrc && !videoError ? (
           <video
             ref={videoRef}
             src={videoSrc}
+            playsInline
             onTimeUpdate={handleNativeTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
             onClick={togglePlay}
+            onError={(e) => {
+              console.error('HTML5 video playback error:', e);
+              setVideoError('Unable to play this video format or codec in your browser (common with MKV / HEVC). Please select an MP4 (H.264) or WebM video file, or test with the Demo Reel.');
+            }}
           >
             {subtitleTrackUrl && subtitlesEnabled && (
               <track
@@ -357,6 +565,30 @@ export default function VideoPlayer({
               />
             )}
           </video>
+        ) : videoError ? (
+          <div className="video-error-overlay">
+            <div className="video-error-icon">
+              <AlertTriangle size={42} color="#f43f5e" />
+            </div>
+            <h3 className="video-error-title">Unable to Play Video</h3>
+            <p className="video-error-desc">{videoError}</p>
+            <div className="video-error-actions">
+              <button
+                className="btn-file-select"
+                onClick={triggerOpenVideoPicker}
+              >
+                <Upload size={18} /> Choose Another Video File (MP4/WebM)
+              </button>
+              <button
+                className="dropzone-demo-btn"
+                onClick={handleGenerateSampleVideo}
+                disabled={isGeneratingDemo}
+              >
+                <Sparkles size={14} color="#ec4899" />
+                {isGeneratingDemo ? 'Generating Reel...' : 'Test with Demo Reel'}
+              </button>
+            </div>
+          </div>
         ) : (
           <div className="dropzone-overlay">
             <div className="dropzone-icon">
@@ -370,7 +602,7 @@ export default function VideoPlayer({
 
             <button
               className="btn-file-select"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={triggerOpenVideoPicker}
             >
               <Upload size={18} /> Choose Video File
             </button>
@@ -391,48 +623,69 @@ export default function VideoPlayer({
           type="file"
           ref={fileInputRef}
           style={{ display: 'none' }}
-          accept="video/*,.mkv,.mp4,.webm,.mov"
-          onChange={(e) => handleFileSelect(e.target.files?.[0])}
+          accept="video/*,.mkv,.mp4,.webm,.mov,.m4v"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFileSelect(file);
+          }}
         />
         <input
           type="file"
           ref={subInputRef}
           style={{ display: 'none' }}
           accept=".srt,.vtt"
-          onChange={(e) => handleSubtitleSelect(e.target.files?.[0])}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleSubtitleSelect(file);
+          }}
         />
 
         {/* Cinema Controls Bar */}
-        {videoSrc && (
-          <div className="cinema-controls">
+        {videoSrc && !videoError && (
+          <div
+            className={`cinema-controls ${controlsVisible || !isPlaying ? 'visible' : ''}`}
+            onMouseEnter={() => {
+              isHoveringControlsRef.current = true;
+              if (hideControlsTimerRef.current) {
+                clearTimeout(hideControlsTimerRef.current);
+                hideControlsTimerRef.current = null;
+              }
+              setControlsVisible(true);
+            }}
+            onMouseLeave={() => {
+              isHoveringControlsRef.current = false;
+              resetControlsTimer();
+            }}
+          >
             {/* Seeker / Progress */}
             <div
-              className="seeker-wrapper"
+              className={`seeker-wrapper ${!canControlPlayback ? 'locked' : ''}`}
               ref={seekerRef}
               onClick={handleSeekClick}
               onMouseMove={handleSeekerMouseMove}
               onMouseLeave={handleSeekerMouseLeave}
+              title={!canControlPlayback ? 'Seek locked: Host-Only Mode is active' : ''}
             >
               <div className="seeker-track">
                 {/* Buffered bar */}
                 <div
                   className="seeker-buffer"
-                  style={{ width: `${duration ? (buffered / duration) * 100 : 0}%` }}
+                  style={{ width: `${isFinite(duration) && duration > 0 ? (buffered / duration) * 100 : 0}%` }}
                 />
                 {/* Current progress fill */}
                 <div
                   className="seeker-fill"
-                  style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                  style={{ width: `${isFinite(duration) && duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
                 />
                 {/* Scrubber thumb */}
                 <div
                   className="seeker-thumb"
-                  style={{ left: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                  style={{ left: `${isFinite(duration) && duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
                 />
               </div>
 
               {/* Hover Tooltip */}
-              {hoverTime !== null && (
+              {hoverTime !== null && canControlPlayback && (
                 <div className="seeker-tooltip" style={{ left: `${hoverPosition}px` }}>
                   {formatTime(hoverTime)}
                 </div>
@@ -443,25 +696,34 @@ export default function VideoPlayer({
             <div className="controls-row">
               <div className="controls-left">
                 <button
-                  className="ctrl-btn play-pause-btn"
+                  className={`ctrl-btn play-pause-btn ${!canControlPlayback ? 'locked-btn' : ''}`}
                   onClick={togglePlay}
                   aria-label={isPlaying ? 'Pause' : 'Play'}
+                  title={!canControlPlayback ? 'Host-Only Mode (Only host can play/pause)' : (isPlaying ? 'Pause' : 'Play')}
                 >
-                  {isPlaying ? <Pause size={20} /> : <Play size={20} style={{ marginLeft: '2px' }} />}
+                  {!canControlPlayback ? (
+                    <Lock size={18} color="#ff2a6d" />
+                  ) : isPlaying ? (
+                    <Pause size={20} />
+                  ) : (
+                    <Play size={20} style={{ marginLeft: '2px' }} />
+                  )}
                 </button>
 
                 <button
-                  className="ctrl-btn"
+                  className={`ctrl-btn ${!canControlPlayback ? 'disabled' : ''}`}
                   onClick={() => handleRelativeSeek(-5)}
-                  title="Rewind 5 seconds"
+                  title={canControlPlayback ? 'Rewind 5 seconds' : 'Rewind locked to Host'}
+                  disabled={!canControlPlayback}
                 >
                   <RotateCcw size={17} />
                 </button>
 
                 <button
-                  className="ctrl-btn"
+                  className={`ctrl-btn ${!canControlPlayback ? 'disabled' : ''}`}
                   onClick={() => handleRelativeSeek(5)}
-                  title="Forward 5 seconds"
+                  title={canControlPlayback ? 'Forward 5 seconds' : 'Forward locked to Host'}
+                  disabled={!canControlPlayback}
                 >
                   <RotateCw size={17} />
                 </button>
@@ -489,6 +751,16 @@ export default function VideoPlayer({
               </div>
 
               <div className="controls-right">
+                {/* Prominent Change Video Button */}
+                <button
+                  className="ctrl-btn ctrl-change-video-btn"
+                  onClick={triggerOpenVideoPicker}
+                  title="Choose or switch video file"
+                >
+                  <Upload size={15} />
+                  <span>Change Video</span>
+                </button>
+
                 {/* Ambient glow toggle */}
                 <button
                   className={`ctrl-btn ${ambientGlow ? 'active' : ''}`}
@@ -511,15 +783,6 @@ export default function VideoPlayer({
                   title={subtitleTrackUrl ? 'Toggle Subtitles' : 'Load Subtitles (.srt, .vtt)'}
                 >
                   <Subtitles size={17} />
-                </button>
-
-                {/* Change video button */}
-                <button
-                  className="ctrl-btn"
-                  onClick={() => fileInputRef.current?.click()}
-                  title="Load a different video file"
-                >
-                  <Upload size={17} />
                 </button>
 
                 {/* Fullscreen */}

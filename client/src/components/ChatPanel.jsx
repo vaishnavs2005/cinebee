@@ -4,7 +4,7 @@ import { MessageSquare, Send, Clock, ChevronRight, Sparkles } from 'lucide-react
 const QUICK_EMOJIS = ['❤️', '😂', '🍿', '😱', '🔥', '👏', '😭', '✨'];
 
 function formatTimecode(seconds) {
-  if (isNaN(seconds) || seconds === null) return null;
+  if (!isFinite(seconds) || seconds === null || seconds < 0) return null;
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
@@ -89,10 +89,11 @@ export default function ChatPanel({
     return (
       <button
         onClick={onToggleCollapse}
+        className="chat-collapsed-floating-btn"
         style={{
           position: 'absolute',
-          right: '16px',
-          bottom: '24px',
+          right: '24px',
+          bottom: '110px',
           zIndex: 30,
           background: 'var(--accent-primary)',
           color: '#fff',
@@ -103,8 +104,9 @@ export default function ChatPanel({
           alignItems: 'center',
           gap: '8px',
           cursor: 'pointer',
-          boxShadow: 'var(--shadow-md)',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(255, 42, 109, 0.4)',
           fontWeight: 600,
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
         }}
       >
         <MessageSquare size={18} /> Chat ({messages.length})

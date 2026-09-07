@@ -115,12 +115,12 @@ class SyncEngine {
     this.callbacks = { ...this.callbacks, ...cbs };
   }
 
-  joinRoom(roomId, username) {
+  joinRoom(roomId, username, mode = null) {
     return new Promise((resolve, reject) => {
       if (!this.socket) this.init();
 
       this.roomId = roomId.trim().toLowerCase();
-      this.socket.emit('join_room', { roomId: this.roomId, username }, (response) => {
+      this.socket.emit('join_room', { roomId: this.roomId, username, mode }, (response) => {
         if (response && response.error) {
           reject(new Error(response.error));
         } else {

@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, Film, CheckCircle2, Zap, Heart, ShieldCheck, HelpCircle, Users } from 'lucide-react';
+import logoImg from '../assets/logo.png';
 
 export default function InfoModal({ isOpen, onClose }) {
   if (!isOpen) return null;
@@ -14,7 +15,7 @@ export default function InfoModal({ isOpen, onClose }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div className="info-badge-icon">
-              <Film size={24} color="#ff2a6d" />
+              <img src={logoImg} alt="CineBee Logo" style={{ width: '28px', height: '28px', objectFit: 'contain' }} />
             </div>
             <div>
               <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>

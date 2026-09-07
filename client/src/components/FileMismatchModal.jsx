@@ -2,7 +2,7 @@ import React from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 
 function formatDuration(sec) {
-  if (!sec || isNaN(sec)) return '0:00';
+  if (!sec || !isFinite(sec) || sec < 0) return '0:00';
   const hrs = Math.floor(sec / 3600);
   const mins = Math.floor((sec % 3600) / 60);
   const secs = Math.floor(sec % 60);
@@ -19,7 +19,11 @@ export default function FileMismatchModal({
 }) {
   if (!myFileInfo || !partnerFileInfo) return null;
 
-  const diff = Math.abs((myFileInfo.duration || 0) - (partnerFileInfo.duration || 0));
+  const myDur = Number(myFileInfo.duration) || 0;
+  const partnerDur = Number(partnerFileInfo.duration) || 0;
+  if (!isFinite(myDur) || !isFinite(partnerDur) || myDur <= 0 || partnerDur <= 0) return null;
+
+  const diff = Math.abs(myDur - partnerDur);
   // If difference is less than 3 seconds, files are considered identical
   if (diff < 3) return null;
 

@@ -9,7 +9,7 @@ import InfoModal from './components/InfoModal';
 import { syncEngine } from './services/syncEngine';
 
 function formatTime(seconds) {
-  if (isNaN(seconds) || seconds === null) return '00:00';
+  if (!isFinite(seconds) || seconds === null || seconds < 0) return '00:00';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
@@ -38,6 +38,7 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
 
   const videoRef = useRef(null);
+  const changeVideoTriggerRef = useRef(null);
 
   const showToast = useCallback((msg) => {
     const id = Date.now() + Math.random();
@@ -145,9 +146,9 @@ export default function App() {
   }, [showToast]);
 
   // Join Room Handler
-  const handleJoinRoom = async (targetRoomId, username) => {
+  const handleJoinRoom = async (targetRoomId, username, initialMode = null) => {
     try {
-      const response = await syncEngine.joinRoom(targetRoomId, username);
+      const response = await syncEngine.joinRoom(targetRoomId, username, initialMode);
       setRoomId(response.roomId);
       setCurrentUser(response.currentUser);
       setUsers(response.users);
@@ -230,6 +231,7 @@ export default function App() {
         onToggleControlMode={handleToggleControlMode}
         onShowToast={showToast}
         onOpenInfo={() => setIsInfoModalOpen(true)}
+        onChangeVideo={() => changeVideoTriggerRef.current?.()}
       />
 
       {/* Main Cinema Workspace */}
@@ -253,6 +255,15 @@ export default function App() {
             remoteAction={remoteAction}
             reactions={reactions}
             onShowToast={showToast}
+            messages={messages}
+            currentUser={currentUser}
+            isHost={isHost}
+            controlMode={controlMode}
+            onToggleControlMode={handleToggleControlMode}
+            onRegisterChangeVideoTrigger={(fn) => { changeVideoTriggerRef.current = fn; }}
+            onSendMessage={handleSendMessage}
+            onSendReaction={handleSendReaction}
+            onSeekToTime={handleSeekToTime}
           />
 
           {/* Sync Status & Resync Controls Bar */}
@@ -263,6 +274,7 @@ export default function App() {
             myFileInfo={myFileInfo}
             partnerPresent={partnerPresent}
             onManualResync={handleManualResync}
+            onChangeVideo={() => changeVideoTriggerRef.current?.()}
           />
         </section>
 

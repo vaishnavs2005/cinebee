@@ -44,7 +44,15 @@ npm --prefix server install
 npm --prefix client install
 ```
 
-### 2. Run in Development Mode
+### 2. ⚡ Fast Local Hosting (One-Click)
+To host the full app locally in seconds and automatically open it in your browser:
+- **Windows (One-Click)**: Double-click [host.bat](file:///d:/2.%20Projects/Cine%20Nightly/host.bat)
+- **PowerShell**: `./host.ps1`
+- **npm / Node**: `npm run host` or `node host.js`
+
+This checks your dependencies, builds if necessary, serves frontend & backend on `http://localhost:3001`, displays your local Wi-Fi Network URL for multi-device watching, and opens your browser.
+
+### 3. Run in Development Mode
 Runs both the backend Socket.IO server (`http://localhost:3001`) and Vite frontend (`http://localhost:5173`) concurrently:
 ```bash
 npm run dev
@@ -52,7 +60,7 @@ npm run dev
 
 Open `http://localhost:5173` in your browser.
 
-### 3. Production Build & Run
+### 4. Production Build & Run Manually
 ```bash
 npm run build
 npm start

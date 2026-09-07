@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Film, LogIn, PlusCircle, Sparkles } from 'lucide-react';
+import { Film, LogIn, PlusCircle, Sparkles, Users, Shield } from 'lucide-react';
+import logoImg from '../assets/logo.png';
 
 const RANDOM_NAMES = [
   'PopcornLover', 'CinemaStar', 'NightDirector', 'FilmBuff', 'CozyViewer',
@@ -21,8 +22,15 @@ export default function RoomModal({
   onOpenInfo,
 }) {
   const [activeTab, setActiveTab] = useState(initialRoomId ? 'join' : 'create');
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(() => {
+    try {
+      return localStorage.getItem('cine_username') || '';
+    } catch {
+      return '';
+    }
+  });
   const [roomCode, setRoomCode] = useState(initialRoomId || '');
+  const [roomMode, setRoomMode] = useState('co-op');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -52,7 +60,7 @@ export default function RoomModal({
     }
 
     localStorage.setItem('cine_username', cleanName);
-    onJoinRoom(targetRoom, cleanName);
+    onJoinRoom(targetRoom, cleanName, activeTab === 'create' ? roomMode : null);
   };
 
   const handleRandomizeName = () => {
@@ -64,7 +72,9 @@ export default function RoomModal({
     <div className="modal-overlay">
       <div className="modal-card">
         <div className="modal-header">
-          <div className="modal-icon">🐝</div>
+          <div className="modal-icon">
+            <img src={logoImg} alt="CineBee Logo" className="modal-logo-img" />
+          </div>
           <h2 className="modal-title">CineBee</h2>
           <p className="modal-subtitle">Synchronized local video parties for two</p>
         </div>
@@ -119,6 +129,38 @@ export default function RoomModal({
               required
             />
           </div>
+
+          {activeTab === 'create' && (
+            <div className="form-group">
+              <label className="form-label" style={{ marginBottom: '8px', display: 'block' }}>
+                Playback Control Mode
+              </label>
+              <div className="modal-mode-selector">
+                <button
+                  type="button"
+                  className={`modal-mode-card ${roomMode === 'co-op' ? 'selected' : ''}`}
+                  onClick={() => setRoomMode('co-op')}
+                >
+                  <div className="modal-mode-card-header">
+                    <Users size={16} color={roomMode === 'co-op' ? '#ff2a6d' : 'var(--text-muted)'} />
+                    <strong>Co-op Mode</strong>
+                  </div>
+                  <span className="modal-mode-card-desc">Both you and your partner can play, pause, and seek</span>
+                </button>
+                <button
+                  type="button"
+                  className={`modal-mode-card ${roomMode === 'host-only' ? 'selected' : ''}`}
+                  onClick={() => setRoomMode('host-only')}
+                >
+                  <div className="modal-mode-card-header">
+                    <Shield size={16} color={roomMode === 'host-only' ? '#ff2a6d' : 'var(--text-muted)'} />
+                    <strong>Host-Only Mode</strong>
+                  </div>
+                  <span className="modal-mode-card-desc">Only you (the room host) can control playback</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {activeTab === 'join' && (
             <div className="form-group">

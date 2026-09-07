@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Share2, Check, Users, Shield, Radio, Copy, HelpCircle } from 'lucide-react';
+import { Share2, Check, Users, Shield, Radio, Copy, HelpCircle, Upload } from 'lucide-react';
+import logoImg from '../assets/logo.png';
 
 export default function Header({
   roomId,
@@ -11,6 +12,7 @@ export default function Header({
   onToggleControlMode,
   onShowToast,
   onOpenInfo,
+  onChangeVideo,
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -26,7 +28,9 @@ export default function Header({
   return (
     <header className="app-header">
       <div className="brand-section">
-        <div className="brand-logo">🐝</div>
+        <div className="brand-logo">
+          <img src={logoImg} alt="CineBee Logo" className="brand-logo-img" />
+        </div>
         <div>
           <h1 className="brand-title">CineBee</h1>
         </div>
@@ -50,6 +54,17 @@ export default function Header({
           </span>
         </div>
 
+        {roomId && (
+          <button
+            onClick={onChangeVideo}
+            className="header-change-video-btn"
+            title="Choose or switch video file"
+          >
+            <Upload size={14} />
+            <span>Change Video</span>
+          </button>
+        )}
+
         <button
           onClick={onOpenInfo}
           className="info-header-btn"
@@ -66,19 +81,25 @@ export default function Header({
             <button
               className={`mode-btn ${controlMode === 'co-op' ? 'active' : ''}`}
               onClick={() => onToggleControlMode('co-op')}
+              title="Both partners can play, pause, and seek"
             >
               <Users size={12} /> Co-op
             </button>
             <button
               className={`mode-btn ${controlMode === 'host-only' ? 'active' : ''}`}
               onClick={() => onToggleControlMode('host-only')}
+              title="Only you (the host) can play, pause, and seek"
             >
               <Shield size={12} /> Host Only
             </button>
           </div>
         ) : (
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Mode: <span style={{ color: '#fff', fontWeight: 600 }}>{controlMode === 'host-only' ? 'Host Only' : 'Co-op'}</span>
+          <div
+            className={`mode-badge-guest ${controlMode === 'host-only' ? 'host-only' : 'co-op'}`}
+            title={controlMode === 'host-only' ? 'Only the room host can play/pause/seek' : 'Both partners can control playback'}
+          >
+            {controlMode === 'host-only' ? <Shield size={12} color="#ec4899" /> : <Users size={12} color="#05d9e8" />}
+            <span>{controlMode === 'host-only' ? 'Host-Only Mode' : 'Co-op Mode'}</span>
           </div>
         )}
 

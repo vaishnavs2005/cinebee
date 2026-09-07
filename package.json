@@ -9,7 +9,8 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "install:all": "npm install && npm --prefix server install && npm --prefix client install",
     "build": "npm run install:all && npm --prefix client run build",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "host": "node host.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
