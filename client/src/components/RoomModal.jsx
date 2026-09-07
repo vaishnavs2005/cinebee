@@ -76,7 +76,7 @@ export default function RoomModal({
             <img src={logoImg} alt="CineBee Logo" className="modal-logo-img" />
           </div>
           <h2 className="modal-title">CineBee</h2>
-          <p className="modal-subtitle">Synchronized local video parties for two</p>
+          <p className="modal-subtitle">Movie parties for two</p>
         </div>
 
         <div className="modal-tabs">
