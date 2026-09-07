@@ -2386,4 +2386,102 @@ body {
   border-color: rgba(255, 255, 255, 0.4);
 }
 
+/* Progressive Streaming Background Pill */
+.stream-background-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(6, 182, 212, 0.15);
+  border: 1px solid rgba(6, 182, 212, 0.45);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  box-shadow: 0 4px 15px rgba(6, 182, 212, 0.25);
+  animation: fade-in 0.3s ease-out;
+}
+
+.stream-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #06b6d4;
+  box-shadow: 0 0 8px #06b6d4;
+  animation: pulse-ring 1.8s infinite;
+}
+
+.stream-zap-icon {
+  color: #38bdf8;
+  animation: zap-flash 1.5s infinite;
+}
+
+.stream-time-tag {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.stream-cancel-tiny {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0 0 4px;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+}
+.stream-cancel-tiny:hover {
+  color: #ff2a6d;
+}
+
+/* Seeking on-demand indicator */
+.stream-seeking-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 26px;
+  background: rgba(10, 10, 15, 0.88);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(6, 182, 212, 0.5);
+  border-radius: var(--radius-lg);
+  color: #fff;
+  font-size: 0.92rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.85), 0 0 25px rgba(6, 182, 212, 0.35);
+  z-index: 20;
+  pointer-events: none;
+  animation: fade-in 0.2s ease-out;
+}
+
+.transmux-progress-bar.indeterminate {
+  width: 40% !important;
+  animation: indeterminate-slide 1.5s infinite ease-in-out;
+}
+
+@keyframes indeterminate-slide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(120%); }
+  100% { transform: translateX(250%); }
+}
+
+.spinner-spin {
+  animation: spin 1s linear infinite;
+  color: #06b6d4;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+
 
