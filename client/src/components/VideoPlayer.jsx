@@ -92,14 +92,25 @@ export default function VideoPlayer({
   const [hoverTime, setHoverTime] = useState(null);
   const [hoverPosition, setHoverPosition] = useState(0);
 
-  // Subtitle track
+  // Subtitle track & cues state
   const [subtitleTrackUrl, setSubtitleTrackUrl] = useState(null);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+  const [subtitleCues, setSubtitleCues] = useState([]);
+  const [activeSubtitleText, setActiveSubtitleText] = useState(null);
 
   // Auto-hide controls after 5 seconds of inactivity
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideControlsTimerRef = useRef(null);
   const isHoveringControlsRef = useRef(false);
+
+  // Ensure HTML5 textTrack mode is synchronized if native track is active
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !video.textTracks) return;
+    for (let i = 0; i < video.textTracks.length; i++) {
+      video.textTracks[i].mode = subtitlesEnabled ? 'showing' : 'disabled';
+    }
+  }, [subtitleTrackUrl, subtitlesEnabled]);
 
   // Register the external change video trigger callback
   useEffect(() => {
@@ -119,27 +130,23 @@ export default function VideoPlayer({
       clearTimeout(hideControlsTimerRef.current);
       hideControlsTimerRef.current = null;
     }
-    if (isPlaying && !isHoveringControlsRef.current) {
+    if (isPlaying) {
       hideControlsTimerRef.current = setTimeout(() => {
-        setControlsVisible(false);
-      }, 5000);
+        if (!isHoveringControlsRef.current) {
+          setControlsVisible(false);
+          setShowAudioMenu(false);
+          setShowSubtitleMenu(false);
+        }
+      }, 4500);
     }
   }, [isPlaying]);
 
-  const handleUserActivity = useCallback(() => {
+  const handleUserActivity = () => {
     resetControlsTimer();
-  }, [resetControlsTimer]);
+  };
 
   useEffect(() => {
-    if (!isPlaying) {
-      if (hideControlsTimerRef.current) {
-        clearTimeout(hideControlsTimerRef.current);
-        hideControlsTimerRef.current = null;
-      }
-      setControlsVisible(true);
-    } else {
-      resetControlsTimer();
-    }
+    resetControlsTimer();
     return () => {
       if (hideControlsTimerRef.current) {
         clearTimeout(hideControlsTimerRef.current);
@@ -157,6 +164,8 @@ export default function VideoPlayer({
     if (subTrack === 'off') {
       setSelectedSubtitleTrackId('off');
       setSubtitleTrackUrl(null);
+      setSubtitleCues([]);
+      setActiveSubtitleText(null);
       setSubtitlesEnabled(false);
       setShowSubtitleMenu(false);
       if (onShowToast) onShowToast('Subtitles turned off');
@@ -171,14 +180,15 @@ export default function VideoPlayer({
     try {
       setIsExtractingSubtitle(true);
       setShowSubtitleMenu(false);
-      if (onShowToast) onShowToast(`Extracting embedded subtitles: ${subTrack.name}...`);
+      if (onShowToast) onShowToast(`Extracting subtitles: ${subTrack.name}...`);
 
       const extracted = await extractEmbeddedSubtitles(file, subTrack.number);
-      if (extracted && extracted.url) {
+      if (extracted && (extracted.url || (extracted.cues && extracted.cues.length > 0))) {
         setSubtitleTrackUrl(extracted.url);
+        setSubtitleCues(extracted.cues || []);
         setSubtitlesEnabled(true);
         setSelectedSubtitleTrackId(subTrack.number);
-        if (onShowToast) onShowToast(`Active Subtitles: ${subTrack.name} (${extracted.count} cues)`);
+        if (onShowToast) onShowToast(`Active Subtitles: ${subTrack.name} (${extracted.count} cues loaded)`);
       } else {
         if (onShowToast) onShowToast(`Could not extract text cues for ${subTrack.name}. Try an external .srt/.vtt file.`);
       }
@@ -308,9 +318,10 @@ export default function VideoPlayer({
     try {
       const sub = await processSubtitleFile(file);
       setSubtitleTrackUrl(sub.url);
+      setSubtitleCues(sub.cues || []);
       setSubtitlesEnabled(true);
       setSelectedSubtitleTrackId('external');
-      if (onShowToast) onShowToast(`Subtitles loaded: ${sub.name}`);
+      if (onShowToast) onShowToast(`Subtitles loaded: ${sub.name} (${sub.cues?.length || 0} cues)`);
     } catch (err) {
       console.error('Subtitle parse error:', err);
       if (onShowToast) onShowToast('Failed to load subtitle file');
@@ -344,6 +355,15 @@ export default function VideoPlayer({
     const cur = video.currentTime;
     setCurrentTime(cur);
     if (onTimeUpdate) onTimeUpdate(cur);
+
+    // Update active subtitle cue for custom cinematic overlay
+    if (subtitlesEnabled && subtitleCues && subtitleCues.length > 0) {
+      const curMs = cur * 1000;
+      const active = subtitleCues.find((c) => curMs >= c.startMs && curMs <= (c.startMs + c.durationMs));
+      setActiveSubtitleText(active ? active.text : null);
+    } else if (activeSubtitleText) {
+      setActiveSubtitleText(null);
+    }
 
     if (video.buffered.length > 0) {
       for (let i = video.buffered.length - 1; i >= 0; i--) {
@@ -781,6 +801,15 @@ export default function VideoPlayer({
               <Sparkles size={14} color="#ec4899" />
               {isGeneratingDemo ? 'Generating Reel...' : 'Generate Demo Reel (Instant Test)'}
             </button>
+          </div>
+        )}
+
+        {/* Cinema Subtitle Custom Overlay */}
+        {videoSrc && !videoError && activeSubtitleText && subtitlesEnabled && (
+          <div className={`cinema-subtitle-overlay ${controlsVisible || !isPlaying ? 'controls-up' : ''}`}>
+            <div className="cinema-subtitle-text">
+              {activeSubtitleText}
+            </div>
           </div>
         )}
 

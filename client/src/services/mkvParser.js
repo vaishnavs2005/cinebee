@@ -130,15 +130,8 @@ function readVintSize(dataView, offset, limit) {
   return { value: val, length: len };
 }
 
-function readUtf8(dataView, offset, length) {
-  const bytes = new Uint8Array(dataView.buffer, dataView.byteOffset + offset, length);
-  // Trim null bytes if any
-  let end = length;
-  while (end > 0 && bytes[end - 1] === 0) end--;
-  return new TextDecoder('utf-8').decode(bytes.subarray(0, end));
-}
-
-function readUint(dataView, offset, length) {
+function safeReadUint(dataView, offset, length, limit = dataView.byteLength) {
+  if (offset + length > limit || offset < 0) return 0;
   let val = 0;
   for (let i = 0; i < length; i++) {
     val = (val * 256) + dataView.getUint8(offset + i);
@@ -146,7 +139,25 @@ function readUint(dataView, offset, length) {
   return val;
 }
 
+function safeReadUtf8(dataView, offset, length, limit = dataView.byteLength) {
+  const actualLen = Math.min(length, Math.max(0, limit - offset));
+  if (actualLen <= 0 || offset < 0) return '';
+  const bytes = new Uint8Array(dataView.buffer, dataView.byteOffset + offset, actualLen);
+  let end = actualLen;
+  while (end > 0 && bytes[end - 1] === 0) end--;
+  return new TextDecoder('utf-8').decode(bytes.subarray(0, end));
+}
+
+function readUtf8(dataView, offset, length) {
+  return safeReadUtf8(dataView, offset, length, dataView.byteLength);
+}
+
+function readUint(dataView, offset, length) {
+  return safeReadUint(dataView, offset, length, dataView.byteLength);
+}
+
 function readFloat(dataView, offset, length) {
+  if (offset + length > dataView.byteLength || offset < 0) return 0;
   if (length === 4) return dataView.getFloat32(offset);
   if (length === 8) return dataView.getFloat64(offset);
   return 0;
@@ -431,28 +442,46 @@ function parseAudioSettings(dataView, start, end, track) {
 
 /**
  * Extracts embedded text subtitles (SRT / UTF-8 / WebVTT / ASS) from an MKV file
- * and returns a WebVTT Object URL to attach directly to HTML5 <video><track>
+ * and returns a WebVTT Object URL and cue array to attach directly to HTML5 <video><track>
  */
 export async function extractEmbeddedSubtitles(file, targetTrackNumber) {
   if (!file) return null;
 
   try {
     const cues = [];
-    const chunkSize = 2 * 1024 * 1024; // 2MB scan window
+    const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB scan buffer
     let fileOffset = 0;
-    const maxScanSize = Math.min(file.size, 100 * 1024 * 1024); // Scan up to 100MB
-
     let currentClusterTimecode = 0;
 
-    while (fileOffset < maxScanSize) {
-      const currentRead = Math.min(chunkSize, file.size - fileOffset);
-      const slice = file.slice(fileOffset, fileOffset + currentRead);
-      const buffer = await slice.arrayBuffer();
-      const view = new DataView(buffer);
-      const len = buffer.byteLength;
+    // Locate Segment element in header
+    const headerSlice = await file.slice(0, Math.min(128 * 1024, file.size)).arrayBuffer();
+    const headerView = new DataView(headerSlice);
+    const headerLimit = headerSlice.byteLength;
+
+    let segStart = 0;
+    for (let i = 0; i < headerLimit - 4; i++) {
+      const elem = readElementId(headerView, i, headerLimit);
+      if (elem && elem.id === 0x18538067) {
+        const segSize = readVintSize(headerView, i + elem.length, headerLimit);
+        if (segSize) {
+          segStart = i + elem.length + segSize.length;
+          break;
+        }
+      }
+    }
+
+    fileOffset = segStart;
+
+    while (fileOffset < file.size) {
+      const readLen = Math.min(CHUNK_SIZE, file.size - fileOffset);
+      const sliceBuffer = await file.slice(fileOffset, fileOffset + readLen).arrayBuffer();
+      const view = new DataView(sliceBuffer);
+      const len = sliceBuffer.byteLength;
 
       let pos = 0;
-      while (pos < len - 8) {
+      let advancedInFile = false;
+
+      while (pos < len - 4) {
         const elem = readElementId(view, pos, len);
         if (!elem) {
           pos++;
@@ -461,46 +490,88 @@ export async function extractEmbeddedSubtitles(file, targetTrackNumber) {
 
         const sizeElem = readVintSize(view, pos + elem.length, len);
         if (!sizeElem) {
-          pos++;
-          continue;
+          break;
         }
 
         const dataStart = pos + elem.length + sizeElem.length;
-        const dataEnd = Math.min(len, dataStart + sizeElem.value);
+        const elemSize = sizeElem.value;
+        const dataEnd = dataStart + elemSize;
+
+        // Container elements: step directly into their contents
+        if (elem.id === 0x1f43b675 || elem.id === 0xa0 || elem.id === 0x18538067) {
+          pos = dataStart;
+          continue;
+        }
+
+        // If a leaf element extends past our current buffer
+        if (dataEnd > len) {
+          // If it's a video/audio block or other non-subtitle leaf, jump directly in file space!
+          if (elem.id !== 0xe7 && elem.id !== 0x9b) {
+            const tVint = (elem.id === 0xa3 || elem.id === 0xa1) ? readVintSize(view, dataStart, len) : null;
+            if (!tVint || tVint.value !== targetTrackNumber) {
+              fileOffset += dataEnd;
+              advancedInFile = true;
+              break;
+            }
+          }
+          // If it is our subtitle block, slide buffer so it fits completely
+          break;
+        }
 
         // Cluster Timecode (0xE7)
         if (elem.id === 0xe7) {
-          currentClusterTimecode = readUint(view, dataStart, sizeElem.value);
+          currentClusterTimecode = safeReadUint(view, dataStart, elemSize, len);
+          pos = dataEnd;
+          continue;
         }
 
         // SimpleBlock (0xA3) or Block (0xA1)
         if (elem.id === 0xa3 || elem.id === 0xa1) {
-          const trackNumVint = readVintSize(view, dataStart, dataEnd);
-          if (trackNumVint && trackNumVint.value === targetTrackNumber) {
-            // Found subtitle block for our target track!
-            const headerOffset = dataStart + trackNumVint.length;
+          const trackVint = readVintSize(view, dataStart, len);
+          if (trackVint && trackVint.value === targetTrackNumber) {
+            const headerOffset = dataStart + trackVint.length;
             if (headerOffset + 3 <= dataEnd) {
-              const relTimecode = view.getInt16(headerOffset); // Signed 16-bit
+              const relTimecode = view.getInt16(headerOffset); // Signed 16-bit relative timecode
               const blockTimeMs = currentClusterTimecode + relTimecode;
               const textStart = headerOffset + 3; // Skip 2 bytes timecode + 1 byte flags
               if (textStart < dataEnd) {
-                const subText = readUtf8(view, textStart, dataEnd - textStart).trim();
-                if (subText && subText.length > 0) {
+                const subText = safeReadUtf8(view, textStart, dataEnd - textStart, len);
+                const cleaned = cleanSubtitleText(subText);
+                if (cleaned) {
                   cues.push({
                     startMs: Math.max(0, blockTimeMs),
-                    durationMs: 3500, // default 3.5s if not defined in BlockGroup
-                    text: cleanSubtitleText(subText),
+                    durationMs: 3500, // default duration if BlockDuration not specified
+                    text: cleaned,
                   });
                 }
               }
             }
           }
+          pos = dataEnd;
+          continue;
         }
 
+        // BlockDuration (0x9B) inside BlockGroup
+        if (elem.id === 0x9b) {
+          const duration = safeReadUint(view, dataStart, elemSize, len);
+          if (cues.length > 0 && duration > 0) {
+            cues[cues.length - 1].durationMs = duration;
+          }
+          pos = dataEnd;
+          continue;
+        }
+
+        // All other leaf elements (SeekHead, Info, Tracks, Cues, video blocks)
         pos = dataEnd;
       }
 
-      fileOffset += currentRead - 1024; // Overlap slightly to prevent boundary cuts
+      if (!advancedInFile) {
+        if (pos === 0) {
+          fileOffset += Math.min(1024, len);
+        } else {
+          fileOffset += pos;
+        }
+      }
     }
 
     if (cues.length === 0) return null;
@@ -520,6 +591,7 @@ export async function extractEmbeddedSubtitles(file, targetTrackNumber) {
     return {
       url: URL.createObjectURL(blob),
       count: cues.length,
+      cues: cues,
     };
   } catch (err) {
     console.warn('Failed to extract embedded subtitles:', err);
@@ -537,6 +609,14 @@ function formatVttTime(millis) {
 }
 
 function cleanSubtitleText(raw) {
-  // Strip ASS/SSA formatting overrides like {\an8}, {\i1} etc.
-  return raw.replace(/\{[^}]+\}/g, '').trim();
+  if (!raw) return '';
+  // If ASS/SSA format (format has commas: ReadOrder, Layer, Style, Name, MarginL, MarginR, MarginV, Effect, Text)
+  const assMatch = raw.match(/^\d+,\d+,[^,]*,[^,]*,[^,]*,[^,]*,[^,]*,[^,]*,([\s\S]*)$/);
+  let text = assMatch ? assMatch[1] : raw;
+  // Replace ASS newline markers \N or \n
+  text = text.replace(/\\N/g, '\n').replace(/\\n/g, '\n');
+  // Strip formatting tags like {\an8}, {\b1}, etc.
+  text = text.replace(/\{[^}]+\}/g, '').trim();
+  return text;
 }
+
