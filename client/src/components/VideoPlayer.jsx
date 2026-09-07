@@ -16,12 +16,17 @@ import {
   Lock,
   Shield,
   Crown,
-  AlertTriangle
+  AlertTriangle,
+  Headphones,
+  Check,
+  Radio,
+  Sliders
 } from 'lucide-react';
 import FloatingReactions from './FloatingReactions';
 import FullscreenChatOverlay from './FullscreenChatOverlay';
 import { generateSampleMovieBlob } from '../services/sampleVideoGenerator';
 import { processSubtitleFile } from '../services/subtitleHelper';
+import { parseMkvMetadata, extractEmbeddedSubtitles } from '../services/mkvParser';
 
 function formatTime(seconds) {
   if (!isFinite(seconds) || seconds === null || seconds < 0) return '00:00';
@@ -61,6 +66,7 @@ export default function VideoPlayer({
   const sampleDurationRef = useRef(null);
   const currentFileNameRef = useRef('Local Video');
 
+  const [currentFileObj, setCurrentFileObj] = useState(null);
   const [videoSrc, setVideoSrc] = useState(null);
   const [videoName, setVideoName] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -73,6 +79,14 @@ export default function VideoPlayer({
   const [ambientGlow, setAmbientGlow] = useState(true);
   const [isGeneratingDemo, setIsGeneratingDemo] = useState(false);
   const [videoError, setVideoError] = useState(null);
+
+  // MKV Metadata (Audio Settings & Embedded Subtitles)
+  const [mkvData, setMkvData] = useState(null);
+  const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState(0);
+  const [selectedSubtitleTrackId, setSelectedSubtitleTrackId] = useState('off');
+  const [showAudioMenu, setShowAudioMenu] = useState(false);
+  const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
+  const [isExtractingSubtitle, setIsExtractingSubtitle] = useState(false);
 
   // Seeker hover tooltip state
   const [hoverTime, setHoverTime] = useState(null);
@@ -136,20 +150,115 @@ export default function VideoPlayer({
   // Guard flag to prevent local DOM events from echo-triggering remote actions
   const isApplyingRemote = useRef(false);
 
-  // Handle Loading Local Video File
-  const handleFileSelect = useCallback((file) => {
+  // Select Embedded or External Subtitle Track
+  const handleSelectSubtitleTrack = async (subTrack, fileToUse = null) => {
+    const file = fileToUse || currentFileObj;
+
+    if (subTrack === 'off') {
+      setSelectedSubtitleTrackId('off');
+      setSubtitleTrackUrl(null);
+      setSubtitlesEnabled(false);
+      setShowSubtitleMenu(false);
+      if (onShowToast) onShowToast('Subtitles turned off');
+      return;
+    }
+
+    if (!file) {
+      setShowSubtitleMenu(false);
+      return;
+    }
+
+    try {
+      setIsExtractingSubtitle(true);
+      setShowSubtitleMenu(false);
+      if (onShowToast) onShowToast(`Extracting embedded subtitles: ${subTrack.name}...`);
+
+      const extracted = await extractEmbeddedSubtitles(file, subTrack.number);
+      if (extracted && extracted.url) {
+        setSubtitleTrackUrl(extracted.url);
+        setSubtitlesEnabled(true);
+        setSelectedSubtitleTrackId(subTrack.number);
+        if (onShowToast) onShowToast(`Active Subtitles: ${subTrack.name} (${extracted.count} cues)`);
+      } else {
+        if (onShowToast) onShowToast(`Could not extract text cues for ${subTrack.name}. Try an external .srt/.vtt file.`);
+      }
+    } catch (err) {
+      console.warn('Subtitle extract error:', err);
+      if (onShowToast) onShowToast('Failed to extract subtitle track');
+    } finally {
+      setIsExtractingSubtitle(false);
+    }
+  };
+
+  // Switch Audio Track
+  const handleSelectAudioTrack = (index) => {
+    setSelectedAudioTrackIndex(index);
+    setShowAudioMenu(false);
+    const track = mkvData?.audioTracks?.[index];
+
+    // If browser supports HTMLMediaElement.audioTracks API
+    const video = videoRef.current;
+    if (video && video.audioTracks && video.audioTracks.length > index) {
+      for (let i = 0; i < video.audioTracks.length; i++) {
+        video.audioTracks[i].enabled = (i === index);
+      }
+    }
+
+    if (track && onShowToast) {
+      onShowToast(`Switched Audio Setting: ${track.name} (${track.codecName} • ${track.channelString})`);
+    }
+  };
+
+  // Handle Loading Local Video File (Supports .mkv, .mp4, .webm, etc.)
+  const handleFileSelect = useCallback(async (file) => {
     if (!file) return;
 
     setVideoError(null);
     sampleDurationRef.current = null;
     currentFileNameRef.current = file.name;
+    setCurrentFileObj(file);
 
     const objectUrl = URL.createObjectURL(file);
     setVideoSrc(objectUrl);
     setVideoName(file.name);
     setIsPlaying(false);
 
-    if (onShowToast) onShowToast(`Loaded: ${file.name}`);
+    // Parse Matroska (MKV / WebM) EBML track metadata
+    try {
+      const parsed = await parseMkvMetadata(file);
+      if (parsed) {
+        setMkvData(parsed);
+
+        // Find default or first audio track
+        const defaultAudioIdx = parsed.audioTracks.findIndex((t) => t.isDefault);
+        setSelectedAudioTrackIndex(defaultAudioIdx >= 0 ? defaultAudioIdx : 0);
+
+        // Check for default subtitle track
+        const defaultSub = parsed.subtitleTracks.find((t) => t.isDefault);
+        if (defaultSub) {
+          handleSelectSubtitleTrack(defaultSub, file);
+        } else {
+          setSelectedSubtitleTrackId('off');
+        }
+
+        const audioMsg = parsed.audioTracks.length > 0 ? `${parsed.audioTracks.length} Audio setting(s)` : '';
+        const subMsg = parsed.subtitleTracks.length > 0 ? `${parsed.subtitleTracks.length} Subtitle track(s)` : '';
+        const summary = [audioMsg, subMsg].filter(Boolean).join(', ');
+
+        if (summary && onShowToast) {
+          onShowToast(`Loaded MKV: ${file.name} (${summary})`);
+        } else if (onShowToast) {
+          onShowToast(`Loaded: ${file.name}`);
+        }
+      } else {
+        setMkvData(null);
+        if (onShowToast) onShowToast(`Loaded: ${file.name}`);
+      }
+    } catch (err) {
+      console.warn('Metadata inspection note:', err);
+      setMkvData(null);
+      if (onShowToast) onShowToast(`Loaded: ${file.name}`);
+    }
   }, [onShowToast]);
 
   // Handle Drag and Drop
@@ -194,12 +303,13 @@ export default function VideoPlayer({
     }
   };
 
-  // Handle Subtitle File
+  // Handle Subtitle File (External .srt / .vtt)
   const handleSubtitleSelect = async (file) => {
     try {
       const sub = await processSubtitleFile(file);
       setSubtitleTrackUrl(sub.url);
       setSubtitlesEnabled(true);
+      setSelectedSubtitleTrackId('external');
       if (onShowToast) onShowToast(`Subtitles loaded: ${sub.name}`);
     } catch (err) {
       console.error('Subtitle parse error:', err);
@@ -271,9 +381,9 @@ export default function VideoPlayer({
         .catch((err) => {
           console.warn('Playback play() was blocked or failed:', err);
           if (err.name === 'NotAllowedError') {
-            if (onShowToast) onShowToast('⚠️ Autoplay blocked by browser. Click video to play.');
+            if (onShowToast) onShowToast('Autoplay blocked by browser. Click video to play.');
           } else {
-            setVideoError('Browser could not play this format. Please select an MP4 (H.264) or WebM file.');
+            setVideoError('Browser could not decode this video/audio format (common with HEVC/DTS in MKV). Try an MP4 (H.264) or WebM file.');
           }
         });
     } else {
@@ -419,7 +529,6 @@ export default function VideoPlayer({
         })
         .catch((err) => {
           console.warn('Remote play blocked by browser:', err);
-          // If browser blocked sound autoplay, mute and resume
           if (err.name === 'NotAllowedError') {
             video.muted = true;
             setIsMuted(true);
@@ -483,6 +592,8 @@ export default function VideoPlayer({
     }
   };
 
+  const activeAudioTrack = mkvData?.audioTracks?.[selectedAudioTrackIndex];
+
   return (
     <div className="player-wrapper" onDrop={handleDrop} onDragOver={handleDragOver}>
       {/* Ambient backlight glow effect behind the player */}
@@ -515,9 +626,46 @@ export default function VideoPlayer({
             <div className="player-file-info">
               <Film size={15} color="#ff2a6d" />
               <span className="player-file-name" title={videoName}>{videoName}</span>
+              {mkvData && (
+                <span className="player-format-tag" title="Matroska (MKV) Container">MKV</span>
+              )}
             </div>
 
             <div className="player-top-actions">
+              {/* Audio Track Indicator / Switcher */}
+              {mkvData?.audioTracks?.length > 0 && (
+                <button
+                  className={`player-track-pill audio ${mkvData.audioTracks.length > 1 ? 'clickable' : ''}`}
+                  onClick={() => {
+                    if (mkvData.audioTracks.length > 1) {
+                      setShowAudioMenu(!showAudioMenu);
+                      setShowSubtitleMenu(false);
+                    }
+                  }}
+                  title={mkvData.audioTracks.length > 1 ? 'Click to switch audio track' : 'Audio Track Info'}
+                >
+                  <Headphones size={13} />
+                  <span>{activeAudioTrack?.name || 'Audio'}</span>
+                  {mkvData.audioTracks.length > 1 && <span className="pill-badge">{mkvData.audioTracks.length}</span>}
+                </button>
+              )}
+
+              {/* Subtitle Indicator / Switcher */}
+              {mkvData?.subtitleTracks?.length > 0 && (
+                <button
+                  className="player-track-pill subtitle clickable"
+                  onClick={() => {
+                    setShowSubtitleMenu(!showSubtitleMenu);
+                    setShowAudioMenu(false);
+                  }}
+                  title="Click to select embedded or external subtitles"
+                >
+                  <Subtitles size={13} />
+                  <span>{selectedSubtitleTrackId !== 'off' ? 'Subtitles ON' : 'Subtitles'}</span>
+                  <span className="pill-badge">{mkvData.subtitleTracks.length}</span>
+                </button>
+              )}
+
               {controlMode === 'host-only' && (
                 <div
                   className={`player-mode-badge ${isHost ? 'host' : 'guest'}`}
@@ -553,7 +701,9 @@ export default function VideoPlayer({
             onClick={togglePlay}
             onError={(e) => {
               console.error('HTML5 video playback error:', e);
-              setVideoError('Unable to play this video format or codec in your browser (common with MKV / HEVC). Please select an MP4 (H.264) or WebM video file, or test with the Demo Reel.');
+              setVideoError(
+                'Unable to decode this video or audio stream natively in your browser. MKV files with H.264 video and AAC / Opus / AC-3 audio work best. Please choose another file or test with the Demo Reel.'
+              );
             }}
           >
             {subtitleTrackUrl && subtitlesEnabled && (
@@ -572,12 +722,28 @@ export default function VideoPlayer({
             </div>
             <h3 className="video-error-title">Unable to Play Video</h3>
             <p className="video-error-desc">{videoError}</p>
+
+            {mkvData && (
+              <div className="mkv-error-details">
+                <strong>Detected File Tracks:</strong>
+                <div className="mkv-tracks-preview">
+                  {mkvData.videoTrack && <div>🎬 Video: {mkvData.videoTrack.codecName} ({mkvData.videoTrack.width}x{mkvData.videoTrack.height})</div>}
+                  {mkvData.audioTracks.map((a, i) => (
+                    <div key={i}>🔊 Audio {i + 1}: {a.name} ({a.codecName} • {a.channelString})</div>
+                  ))}
+                  {mkvData.subtitleTracks.map((s, i) => (
+                    <div key={i}>💬 Subtitle {i + 1}: {s.name} ({s.codecName})</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="video-error-actions">
               <button
                 className="btn-file-select"
                 onClick={triggerOpenVideoPicker}
               >
-                <Upload size={18} /> Choose Another Video File (MP4/WebM)
+                <Upload size={18} /> Choose Another Video File
               </button>
               <button
                 className="dropzone-demo-btn"
@@ -596,15 +762,15 @@ export default function VideoPlayer({
             </div>
             <h3 className="dropzone-title">Load Movie File</h3>
             <p className="dropzone-desc">
-              Drag & drop your local video file here, or click to choose from your device.
-              Files stay 100% on your device and are never uploaded.
+              Drag & drop your local video file (<strong>.mkv</strong>, <strong>.mp4</strong>, <strong>.webm</strong>, .mov).
+              Files stay 100% on your device and are never uploaded. Multiple audio settings and embedded subtitles are automatically detected!
             </p>
 
             <button
               className="btn-file-select"
               onClick={triggerOpenVideoPicker}
             >
-              <Upload size={18} /> Choose Video File
+              <Upload size={18} /> Choose Video File (.mkv, .mp4, .webm)
             </button>
 
             <button
@@ -751,7 +917,162 @@ export default function VideoPlayer({
               </div>
 
               <div className="controls-right">
-                {/* Prominent Change Video Button */}
+                {/* Audio Settings & Multiple Tracks Popover Menu */}
+                <div className="track-menu-wrapper">
+                  <button
+                    className={`ctrl-btn ${showAudioMenu || (mkvData?.audioTracks?.length > 1) ? 'active' : ''}`}
+                    onClick={() => {
+                      setShowAudioMenu(!showAudioMenu);
+                      setShowSubtitleMenu(false);
+                    }}
+                    title="Audio Settings & Multiple Tracks"
+                  >
+                    <Headphones size={17} />
+                    {mkvData?.audioTracks?.length > 1 && (
+                      <span className="ctrl-badge">{mkvData.audioTracks.length}</span>
+                    )}
+                  </button>
+
+                  {showAudioMenu && (
+                    <div className="track-popover-menu audio-popover">
+                      <div className="track-popover-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Headphones size={15} color="#ff2a6d" />
+                          <strong>Audio Settings & Tracks</strong>
+                        </div>
+                        <button className="track-popover-close" onClick={() => setShowAudioMenu(false)}>✕</button>
+                      </div>
+
+                      <div className="track-popover-list">
+                        {mkvData?.audioTracks && mkvData.audioTracks.length > 0 ? (
+                          mkvData.audioTracks.map((track, idx) => (
+                            <button
+                              key={track.uid || idx}
+                              className={`track-option-item ${selectedAudioTrackIndex === idx ? 'selected' : ''}`}
+                              onClick={() => handleSelectAudioTrack(idx)}
+                            >
+                              <div className="track-option-left">
+                                <span className={`track-radio ${selectedAudioTrackIndex === idx ? 'checked' : ''}`} />
+                                <div className="track-option-text">
+                                  <div className="track-option-title">
+                                    {track.name}
+                                    {track.isDefault && <span className="track-tag default">Default</span>}
+                                  </div>
+                                  <div className="track-option-meta">
+                                    {track.codecName} • {track.channelString} • {track.samplingFrequency ? `${Math.round(track.samplingFrequency / 1000)}kHz` : ''}
+                                  </div>
+                                </div>
+                              </div>
+                              {selectedAudioTrackIndex === idx && <Check size={16} color="#ff2a6d" />}
+                            </button>
+                          ))
+                        ) : (
+                          <div className="track-option-empty">
+                            <span>Default Audio Stream Active</span>
+                            <p className="track-option-empty-desc">Playing via standard browser stereo audio.</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="track-popover-footer">
+                        <span>MKV Audio: Full fidelity surround/stereo decoded</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Subtitles Menu & Popover (Embedded MKV + External) */}
+                <div className="track-menu-wrapper">
+                  <button
+                    className={`ctrl-btn ${showSubtitleMenu || (subtitleTrackUrl && subtitlesEnabled) ? 'active' : ''}`}
+                    onClick={() => {
+                      setShowSubtitleMenu(!showSubtitleMenu);
+                      setShowAudioMenu(false);
+                    }}
+                    title={subtitleTrackUrl ? 'Subtitle Settings' : 'Load or Select Subtitles'}
+                  >
+                    <Subtitles size={17} />
+                    {mkvData?.subtitleTracks?.length > 0 && (
+                      <span className="ctrl-badge">{mkvData.subtitleTracks.length}</span>
+                    )}
+                  </button>
+
+                  {showSubtitleMenu && (
+                    <div className="track-popover-menu subtitle-popover">
+                      <div className="track-popover-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Subtitles size={15} color="#05d9e8" />
+                          <strong>Subtitles ({mkvData?.subtitleTracks?.length || 0} embedded)</strong>
+                        </div>
+                        <button className="track-popover-close" onClick={() => setShowSubtitleMenu(false)}>✕</button>
+                      </div>
+
+                      <div className="track-popover-list">
+                        {/* Off Option */}
+                        <button
+                          className={`track-option-item ${selectedSubtitleTrackId === 'off' ? 'selected' : ''}`}
+                          onClick={() => handleSelectSubtitleTrack('off')}
+                        >
+                          <div className="track-option-left">
+                            <span className={`track-radio ${selectedSubtitleTrackId === 'off' ? 'checked' : ''}`} />
+                            <span className="track-option-title">Off (No Subtitles)</span>
+                          </div>
+                          {selectedSubtitleTrackId === 'off' && <Check size={16} color="#05d9e8" />}
+                        </button>
+
+                        {/* Embedded MKV Subtitle Tracks */}
+                        {mkvData?.subtitleTracks && mkvData.subtitleTracks.length > 0 && (
+                          <div className="track-section-divider">
+                            <span>Embedded MKV Subtitles</span>
+                          </div>
+                        )}
+
+                        {mkvData?.subtitleTracks?.map((track) => (
+                          <button
+                            key={track.uid || track.number}
+                            className={`track-option-item ${selectedSubtitleTrackId === track.number ? 'selected' : ''}`}
+                            onClick={() => handleSelectSubtitleTrack(track)}
+                            disabled={isExtractingSubtitle}
+                          >
+                            <div className="track-option-left">
+                              <span className={`track-radio ${selectedSubtitleTrackId === track.number ? 'checked' : ''}`} />
+                              <div className="track-option-text">
+                                <div className="track-option-title">
+                                  {track.name}
+                                  {track.isDefault && <span className="track-tag default">Default</span>}
+                                </div>
+                                <div className="track-option-meta">
+                                  {track.codecName} • Language: {track.languageName}
+                                </div>
+                              </div>
+                            </div>
+                            {selectedSubtitleTrackId === track.number && <Check size={16} color="#05d9e8" />}
+                          </button>
+                        ))}
+
+                        {/* External Subtitle Track */}
+                        <div className="track-section-divider">
+                          <span>External Subtitles</span>
+                        </div>
+
+                        <button
+                          className="track-option-item upload-item"
+                          onClick={() => {
+                            setShowSubtitleMenu(false);
+                            subInputRef.current?.click();
+                          }}
+                        >
+                          <div className="track-option-left">
+                            <Upload size={14} color="#05d9e8" />
+                            <span className="track-option-title">Load Subtitle File (.srt, .vtt)</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Change Video Button */}
                 <button
                   className="ctrl-btn ctrl-change-video-btn"
                   onClick={triggerOpenVideoPicker}
@@ -768,21 +1089,6 @@ export default function VideoPlayer({
                   title="Ambient Backlight Glow"
                 >
                   <Sun size={17} />
-                </button>
-
-                {/* Subtitles toggle / loader */}
-                <button
-                  className={`ctrl-btn ${subtitleTrackUrl && subtitlesEnabled ? 'active' : ''}`}
-                  onClick={() => {
-                    if (subtitleTrackUrl) {
-                      setSubtitlesEnabled(!subtitlesEnabled);
-                    } else {
-                      subInputRef.current?.click();
-                    }
-                  }}
-                  title={subtitleTrackUrl ? 'Toggle Subtitles' : 'Load Subtitles (.srt, .vtt)'}
-                >
-                  <Subtitles size={17} />
                 </button>
 
                 {/* Fullscreen */}

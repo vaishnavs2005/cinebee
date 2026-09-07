@@ -1885,4 +1885,392 @@ body {
   color: var(--text-secondary);
 }
 
+/* =========================================================
+   MKV Audio & Subtitle Popovers, Top Bar & Tags
+   ========================================================= */
+
+.player-top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to bottom, rgba(9, 6, 8, 0.92) 0%, rgba(9, 6, 8, 0.5) 60%, transparent 100%);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity var(--transition-normal), transform var(--transition-normal);
+  z-index: 12;
+}
+.player-top-bar.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.player-file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.player-file-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #fff;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-format-tag {
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(5, 217, 232, 0.16);
+  border: 1px solid rgba(5, 217, 232, 0.4);
+  color: #05d9e8;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.player-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-track-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  font-size: 0.76rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+.player-track-pill.audio {
+  background: rgba(255, 42, 109, 0.12);
+  border-color: rgba(255, 42, 109, 0.3);
+  color: #f472b6;
+}
+.player-track-pill.subtitle {
+  background: rgba(5, 217, 232, 0.12);
+  border-color: rgba(5, 217, 232, 0.3);
+  color: #38bdf8;
+}
+.player-track-pill.clickable {
+  cursor: pointer;
+}
+.player-track-pill.clickable:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+}
+.player-track-pill.audio.clickable:hover {
+  background: rgba(255, 42, 109, 0.22);
+  border-color: rgba(255, 42, 109, 0.6);
+}
+.player-track-pill.subtitle.clickable:hover {
+  background: rgba(5, 217, 232, 0.22);
+  border-color: rgba(5, 217, 232, 0.6);
+}
+
+.track-count-badge {
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+  color: #fff;
+}
+
+.player-change-video-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.player-change-video-pill:hover {
+  background: rgba(255, 42, 109, 0.25);
+  border-color: rgba(255, 42, 109, 0.5);
+  transform: translateY(-1px);
+}
+
+/* Track Popover Menus */
+.track-menu-wrapper {
+  position: relative;
+}
+
+.ctrl-btn {
+  position: relative;
+}
+.ctrl-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  background: #05d9e8;
+  color: #000;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 10px;
+  box-shadow: 0 0 6px rgba(5, 217, 232, 0.6);
+  pointer-events: none;
+}
+
+.ctrl-change-video-btn {
+  width: auto !important;
+  padding: 0 14px !important;
+  gap: 6px;
+  border-radius: var(--radius-full) !important;
+  background: rgba(255, 42, 109, 0.14) !important;
+  border: 1px solid rgba(255, 42, 109, 0.35) !important;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.ctrl-change-video-btn:hover {
+  background: rgba(255, 42, 109, 0.28) !important;
+  border-color: rgba(255, 42, 109, 0.6) !important;
+  color: #fff !important;
+}
+
+.track-popover-menu {
+  position: absolute;
+  bottom: 48px;
+  right: -20px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  background: rgba(18, 11, 16, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 42, 109, 0.3);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.8), 0 0 20px rgba(255, 42, 109, 0.15);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  animation: fadeInSlideUp 0.18s ease-out;
+}
+.track-popover-menu.subtitle-popover {
+  border-color: rgba(5, 217, 232, 0.3);
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.8), 0 0 20px rgba(5, 217, 232, 0.15);
+}
+
+@keyframes fadeInSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.track-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.85rem;
+  color: #fff;
+}
+.track-popover-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  transition: color var(--transition-fast);
+}
+.track-popover-close:hover {
+  color: #fff;
+}
+
+.track-popover-list {
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.track-option-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+  color: var(--text-secondary);
+}
+.track-option-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+.track-option-item.selected {
+  background: rgba(255, 42, 109, 0.14);
+  border-color: rgba(255, 42, 109, 0.35);
+  color: #fff;
+}
+.subtitle-popover .track-option-item.selected {
+  background: rgba(5, 217, 232, 0.14);
+  border-color: rgba(5, 217, 232, 0.35);
+}
+
+.track-option-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.track-radio {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+  position: relative;
+  transition: all var(--transition-fast);
+}
+.track-radio.checked {
+  border-color: #ff2a6d;
+  background: #ff2a6d;
+  box-shadow: 0 0 6px rgba(255, 42, 109, 0.6);
+}
+.subtitle-popover .track-radio.checked {
+  border-color: #05d9e8;
+  background: #05d9e8;
+  box-shadow: 0 0 6px rgba(5, 217, 232, 0.6);
+}
+
+.track-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.track-option-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.track-tag.default {
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.track-option-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-section-divider {
+  padding: 8px 10px 4px 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+.track-popover-footer {
+  padding: 8px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.track-option-empty {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+.track-option-empty-desc {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.track-option-item.upload-item {
+  border: 1px dashed rgba(5, 217, 232, 0.35);
+  background: rgba(5, 217, 232, 0.05);
+  margin-top: 4px;
+}
+.track-option-item.upload-item:hover {
+  background: rgba(5, 217, 232, 0.14);
+  border-color: #05d9e8;
+}
+
+/* MKV Error Diagnostics */
+.mkv-error-details {
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: left;
+  font-size: 0.8rem;
+  width: 100%;
+  max-width: 500px;
+}
+.mkv-tracks-preview {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
 
