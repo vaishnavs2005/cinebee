@@ -57,12 +57,30 @@ export class MseStreamController {
     this.isDestroyed = false;
     this.hasStartedPlayback = false;
     this.totalDuration = options.duration || 0;
-
     this.currentStreamOffset = 0;
 
     ensureDecodersRegistered();
 
-    this.mediaSource.addEventListener('sourceopen', this.handleSourceOpen.bind(this), { once: true });
+    this.sourceOpenTimer = setTimeout(() => {
+      if (!this.sourceBuffer && !this.isDestroyed) {
+        console.warn('MediaSource sourceopen timeout (4s). Falling back to direct remuxing.');
+        this.onError(new Error('MediaSource sourceopen timeout'));
+      }
+    }, 4000);
+
+    const onOpen = () => {
+      if (this.sourceOpenTimer) {
+        clearTimeout(this.sourceOpenTimer);
+        this.sourceOpenTimer = null;
+      }
+      this.handleSourceOpen();
+    };
+
+    if (this.mediaSource.readyState === 'open') {
+      onOpen();
+    } else {
+      this.mediaSource.addEventListener('sourceopen', onOpen, { once: true });
+    }
   }
 
   getMediaUrl() {
@@ -138,6 +156,7 @@ export class MseStreamController {
           for (const cand of hevcCandidates) {
             if (MediaSource.isTypeSupported(cand)) return cand;
           }
+          throw new Error('HEVC playback via MediaSource is not supported by your browser');
         } else if (codec === 'avc') {
           return 'video/mp4; codecs="avc1.640028, mp4a.40.2"';
         } else if (codec === 'vp9') {
@@ -233,8 +252,7 @@ export class MseStreamController {
       });
 
       const target = new StreamTarget(writable, {
-        chunked: true,
-        chunkSize: 512 * 1024, // 512 KB chunks for fast initial playback start
+        chunked: false, // Stream fragments immediately as soon as ready!
       });
 
       const format = new Mp4OutputFormat({
@@ -357,6 +375,10 @@ export class MseStreamController {
 
   destroy() {
     this.isDestroyed = true;
+    if (this.sourceOpenTimer) {
+      clearTimeout(this.sourceOpenTimer);
+      this.sourceOpenTimer = null;
+    }
     if (this.currentAbortController) {
       this.currentAbortController.abort();
     }

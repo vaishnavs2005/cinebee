@@ -365,6 +365,9 @@ export default function VideoPlayer({
         });
 
         streamControllerRef.current = controller;
+        // Attach MediaSource object URL immediately so the browser opens MediaSource and fires sourceopen!
+        setVideoSrc(controller.getMediaUrl());
+        setVideoError(null);
         return;
       }
 
@@ -813,8 +816,45 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {/* Video Element or Dropzone or Transmuxing or Error View */}
-        {isTransmuxing ? (
+        {/* Main Video Element - ALWAYS kept mounted when videoSrc exists so MediaSource can attach and open! */}
+        {videoSrc && (
+          <>
+            <video
+              ref={videoRef}
+              src={videoSrc}
+              playsInline
+              onTimeUpdate={handleNativeTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onClick={togglePlay}
+              onSeeking={(e) => {
+                if (streamControllerRef.current && isFinite(e.target.currentTime)) {
+                  streamControllerRef.current.seek(e.target.currentTime);
+                }
+              }}
+              onError={(e) => {
+                // Ignore initial video errors if we are actively transmuxing/streaming
+                if (!isTransmuxing && !isBufferingSegment && !isBackgroundStreaming) {
+                  console.error('HTML5 video playback error:', e);
+                  setVideoError(
+                    'Browser could not decode this video/audio format (common with HEVC/DTS in MKV). Try an MP4 (H.264) or WebM file.'
+                  );
+                }
+              }}
+            />
+            {/* On-demand seek buffering indicator */}
+            {!isTransmuxing && isBufferingSegment && (
+              <div className="stream-seeking-indicator">
+                <Loader2 size={24} className="spinner-spin" />
+                <span>{bufferingMessage || 'Buffering section...'}</span>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Initial Stream / Transmux Buffering Modal (Displayed above video during the ~1-2s start) */}
+        {isTransmuxing && (
           <div className="transmux-progress-overlay">
             <div className="transmux-spinner-box">
               <Zap size={40} className="transmux-zap-icon" />
@@ -833,38 +873,10 @@ export default function VideoPlayer({
               Cancel
             </button>
           </div>
-        ) : videoSrc && !videoError ? (
-          <>
-            <video
-              ref={videoRef}
-              src={videoSrc}
-              playsInline
-              onTimeUpdate={handleNativeTimeUpdate}
-              onLoadedMetadata={handleLoadedMetadata}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              onClick={togglePlay}
-              onSeeking={(e) => {
-                if (streamControllerRef.current && isFinite(e.target.currentTime)) {
-                  streamControllerRef.current.seek(e.target.currentTime);
-                }
-              }}
-              onError={(e) => {
-                console.error('HTML5 video playback error:', e);
-                setVideoError(
-                  'Browser could not decode this video/audio format (common with HEVC/DTS in MKV). Try an MP4 (H.264) or WebM file.'
-                );
-              }}
-            />
-            {/* On-demand seek buffering indicator */}
-            {isBufferingSegment && (
-              <div className="stream-seeking-indicator">
-                <Loader2 size={24} className="spinner-spin" />
-                <span>{bufferingMessage || 'Buffering section...'}</span>
-              </div>
-            )}
-          </>
-        ) : videoError ? (
+        )}
+
+        {/* Error View (only if not currently transmuxing or background streaming) */}
+        {!isTransmuxing && !isBackgroundStreaming && videoError && (
           <div className="video-error-overlay">
             <div className="video-error-icon">
               <AlertTriangle size={42} color="#f43f5e" />
@@ -920,7 +932,10 @@ export default function VideoPlayer({
               </button>
             </div>
           </div>
-        ) : (
+        )}
+
+        {/* Dropzone View if no file loaded */}
+        {!videoSrc && !isTransmuxing && (
           <div className="dropzone-overlay">
             <div className="dropzone-icon">
               <Film size={36} />
