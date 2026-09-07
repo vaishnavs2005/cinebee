@@ -59,10 +59,12 @@ export class MseStreamController {
     this.isDestroyed = false;
     this.hasStartedPlayback = false;
     this.shouldBePlaying = true;
+    this.isAwaitingSeekBuffer = false;
     this.totalDuration = options.duration || 0;
     this.currentStreamOffset = 0;
 
     ensureDecodersRegistered();
+    this.bindVideoListeners();
 
     this.sourceOpenTimer = setTimeout(() => {
       if (!this.sourceBuffer && !this.isDestroyed) {
@@ -91,7 +93,20 @@ export class MseStreamController {
   }
 
   setVideoElement(el) {
+    if (this.videoElement === el) return;
     this.videoElement = el;
+    this.bindVideoListeners();
+  }
+
+  bindVideoListeners() {
+    if (!this.videoElement || this.listenersBound) return;
+    this.videoElement.addEventListener('play', () => {
+      this.shouldBePlaying = true;
+    });
+    this.videoElement.addEventListener('pause', () => {
+      this.shouldBePlaying = false;
+    });
+    this.listenersBound = true;
   }
 
   setTotalDuration(duration) {
@@ -131,11 +146,14 @@ export class MseStreamController {
               }
             }
 
-            // Auto-resume playback if user intended playback and data has landed
-            if (this.shouldBePlaying && this.videoElement.paused) {
-              this.videoElement.play().catch((err) => {
-                console.warn('Playback resume note:', err);
-              });
+            // Only auto-play on the initial seek chunk landing if user was actively playing
+            if (this.isAwaitingSeekBuffer) {
+              this.isAwaitingSeekBuffer = false;
+              if (this.shouldBePlaying && this.videoElement.paused) {
+                this.videoElement.play().catch((err) => {
+                  console.warn('Playback resume note:', err);
+                });
+              }
             }
           }
 
@@ -361,8 +379,8 @@ export class MseStreamController {
   async seek(targetTime) {
     if (this.isDestroyed) return true;
 
-    if (this.videoElement && !this.videoElement.paused) {
-      this.shouldBePlaying = true;
+    if (this.videoElement) {
+      this.shouldBePlaying = !this.videoElement.paused;
     }
 
     // 1. Check if targetTime is already inside a buffered range
@@ -381,6 +399,8 @@ export class MseStreamController {
         }
       }
     }
+
+    this.isAwaitingSeekBuffer = true;
 
     // 2. Find closest preceding keyframe timestamp for clean, instantaneous start
     let keyframeTime = targetTime;
