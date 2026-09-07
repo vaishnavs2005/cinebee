@@ -83,11 +83,11 @@ export async function transmuxForBrowser(file, onProgress, abortSignal, selected
         forceTranscode: false, // Copy video stream directly
       },
       audio: (track, n) => {
-        // Keep the selected audio track, transcode to AAC
-        const trackIdx = (n !== undefined ? n - 1 : 0);
-        if (trackIdx === selectedAudioTrackIdx || trackIdx === 0) {
+        const trackIdx = track.number !== undefined ? track.number - 1 : (n !== undefined ? n - 1 : 0);
+        if (trackIdx === selectedAudioTrackIdx || (selectedAudioTrackIdx === 0 && trackIdx === 0)) {
           return {
             codec: 'aac',
+            numberOfChannels: 2, // Force downmix 5.1 surround sound to 2-channel stereo for browser WebCodecs compatibility
             forceTranscode: true,
           };
         }
@@ -106,10 +106,21 @@ export async function transmuxForBrowser(file, onProgress, abortSignal, selected
       },
       audio: {
         codec: 'aac',
+        numberOfChannels: 2, // Force downmix 5.1 surround sound to 2-channel stereo for browser WebCodecs compatibility
         forceTranscode: true,
       },
       showWarnings: false,
     });
+  }
+
+  // Ensure audio was not discarded
+  const discardedAudio = conversion.discardedTracks.find(
+    (t) => t.track?.type === 'audio' && t.reason !== 'discarded_by_user'
+  );
+  const hasUtilizedAudio = conversion.utilizedTracks.some((t) => t.type === 'audio');
+  if (discardedAudio && !hasUtilizedAudio) {
+    console.error('Audio track was discarded! Reason:', discardedAudio.reason);
+    throw new Error(`Audio track could not be encoded: ${discardedAudio.reason}`);
   }
 
   if (!conversion.isValid) {

@@ -266,8 +266,17 @@ export default function VideoPlayer({
       setVideoSrc(result.url);
       setVideoError(null);
       setIsPlaying(false);
+
+      // Ensure audio is unmuted and volume is full
+      if (videoRef.current) {
+        videoRef.current.muted = false;
+        videoRef.current.volume = 1;
+      }
+      setIsMuted(false);
+      setVolume(1);
+
       if (onShowToast) {
-        onShowToast('🎉 Ready to play! Video remuxed with browser-compatible AAC audio.');
+        onShowToast('🎉 Ready to play! Video remuxed with browser-compatible AAC stereo audio.');
       }
     } catch (err) {
       console.error('Transmux error:', err);
