@@ -144,6 +144,13 @@ export default function VideoPlayer({
     };
   }, [isPlaying, resetControlsTimer]);
 
+  // Keep stream controller attached to active video element
+  useEffect(() => {
+    if (streamControllerRef.current && videoRef.current) {
+      streamControllerRef.current.setVideoElement(videoRef.current);
+    }
+  }, [videoRef.current, videoSrc]);
+
   // Guard flag to prevent local DOM events from echo-triggering remote actions
   const isApplyingRemote = useRef(false);
 
@@ -280,6 +287,7 @@ export default function VideoPlayer({
         const controller = new MseStreamController(currentFileObj, {
           duration: fileDuration,
           selectedAudioTrackIndex,
+          videoElement: videoRef.current,
           onStatus: ({ status, progress, processedTime, message }) => {
             if (progress !== undefined) setTransmuxProgress(progress);
             if (processedTime !== undefined) setTransmuxTime(processedTime);
@@ -521,12 +529,15 @@ export default function VideoPlayer({
     const newTime = Math.max(0, Math.min(maxDuration, (video.currentTime || 0) + delta));
     if (!isFinite(newTime)) return;
 
-    if (streamControllerRef.current) {
-      streamControllerRef.current.seek(newTime);
-    }
-
-    video.currentTime = newTime;
     setCurrentTime(newTime);
+
+    if (streamControllerRef.current) {
+      setIsBufferingSegment(true);
+      setBufferingMessage(`Jumping to ${formatTime(newTime)}...`);
+      streamControllerRef.current.seek(newTime);
+    } else {
+      video.currentTime = newTime;
+    }
 
     if (!isApplyingRemote.current && onPlaybackAction) {
       onPlaybackAction('seek', newTime);
@@ -549,12 +560,15 @@ export default function VideoPlayer({
     const targetTime = pos * duration;
     if (!isFinite(targetTime)) return;
 
-    if (streamControllerRef.current) {
-      streamControllerRef.current.seek(targetTime);
-    }
-
-    video.currentTime = targetTime;
     setCurrentTime(targetTime);
+
+    if (streamControllerRef.current) {
+      setIsBufferingSegment(true);
+      setBufferingMessage(`Jumping to ${formatTime(targetTime)}...`);
+      streamControllerRef.current.seek(targetTime);
+    } else {
+      video.currentTime = targetTime;
+    }
 
     if (!isApplyingRemote.current && onPlaybackAction) {
       onPlaybackAction('seek', targetTime);
@@ -637,17 +651,24 @@ export default function VideoPlayer({
     const targetTime = remoteAction.time;
 
     if (remoteAction.type === 'seek') {
-      if (streamControllerRef.current) {
-        streamControllerRef.current.seek(targetTime);
-      }
-      video.currentTime = targetTime;
       setCurrentTime(targetTime);
+      if (streamControllerRef.current) {
+        setIsBufferingSegment(true);
+        setBufferingMessage(`Syncing to ${formatTime(targetTime)}...`);
+        streamControllerRef.current.seek(targetTime);
+      } else {
+        video.currentTime = targetTime;
+      }
     } else if (remoteAction.type === 'play') {
       if (Math.abs(video.currentTime - targetTime) > 0.4) {
+        setCurrentTime(targetTime);
         if (streamControllerRef.current) {
+          setIsBufferingSegment(true);
+          setBufferingMessage(`Syncing to ${formatTime(targetTime)}...`);
           streamControllerRef.current.seek(targetTime);
+        } else {
+          video.currentTime = targetTime;
         }
-        video.currentTime = targetTime;
       }
       video.play()
         .then(() => {
@@ -828,11 +849,6 @@ export default function VideoPlayer({
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
               onClick={togglePlay}
-              onSeeking={(e) => {
-                if (streamControllerRef.current && isFinite(e.target.currentTime)) {
-                  streamControllerRef.current.seek(e.target.currentTime);
-                }
-              }}
               onError={(e) => {
                 // Ignore initial video errors if we are actively transmuxing/streaming
                 if (!isTransmuxing && !isBufferingSegment && !isBackgroundStreaming) {

@@ -8,6 +8,7 @@ import {
   BlobSource,
   Mp4OutputFormat,
   StreamTarget,
+  EncodedPacketSink,
 } from 'mediabunny';
 
 let decodersRegistered = false;
@@ -42,6 +43,7 @@ export class MseStreamController {
     this.file = file;
     this.options = options;
     this.selectedAudioTrackIndex = options.selectedAudioTrackIndex ?? 0;
+    this.videoElement = options.videoElement ?? null;
     this.onStatus = options.onStatus ?? (() => {});
     this.onError = options.onError ?? (() => {});
     this.onReady = options.onReady ?? (() => {});
@@ -56,6 +58,7 @@ export class MseStreamController {
     this.currentConversion = null;
     this.isDestroyed = false;
     this.hasStartedPlayback = false;
+    this.shouldBePlaying = true;
     this.totalDuration = options.duration || 0;
     this.currentStreamOffset = 0;
 
@@ -87,6 +90,10 @@ export class MseStreamController {
     return this.mediaUrl;
   }
 
+  setVideoElement(el) {
+    this.videoElement = el;
+  }
+
   setTotalDuration(duration) {
     if (duration > 0 && isFinite(duration)) {
       this.totalDuration = duration;
@@ -110,9 +117,35 @@ export class MseStreamController {
 
       this.sourceBuffer.addEventListener('updateend', () => {
         this.isAppending = false;
-        if (!this.hasStartedPlayback && this.sourceBuffer.buffered.length > 0) {
-          this.hasStartedPlayback = true;
-          this.onReady();
+        if (this.sourceBuffer && this.sourceBuffer.buffered && this.sourceBuffer.buffered.length > 0) {
+          const buffered = this.sourceBuffer.buffered;
+          // Bridge any keyframe or pre-frame gap so player doesn't stall waiting for missing frames
+          if (this.videoElement) {
+            const cur = this.videoElement.currentTime;
+            for (let i = 0; i < buffered.length; i++) {
+              const bStart = buffered.start(i);
+              const bEnd = buffered.end(i);
+              if (cur < bStart && bStart - cur < 6.0) {
+                this.videoElement.currentTime = bStart + 0.02;
+                break;
+              }
+            }
+
+            // Auto-resume playback if user intended playback and data has landed
+            if (this.shouldBePlaying && this.videoElement.paused) {
+              this.videoElement.play().catch((err) => {
+                console.warn('Playback resume note:', err);
+              });
+            }
+          }
+
+          if (!this.hasStartedPlayback) {
+            this.hasStartedPlayback = true;
+            this.onReady();
+          } else {
+            // Dismiss seek buffering indicator once buffer has landed
+            this.onStatus({ status: 'streaming' });
+          }
         }
         this.processAppendQueue();
       });
@@ -328,26 +361,55 @@ export class MseStreamController {
   async seek(targetTime) {
     if (this.isDestroyed) return true;
 
+    if (this.videoElement && !this.videoElement.paused) {
+      this.shouldBePlaying = true;
+    }
+
     // 1. Check if targetTime is already inside a buffered range
     if (this.sourceBuffer && this.sourceBuffer.buffered) {
       const buffered = this.sourceBuffer.buffered;
       for (let i = 0; i < buffered.length; i++) {
         if (targetTime >= buffered.start(i) && targetTime <= buffered.end(i) - 0.5) {
-          // Already in buffer, native video.currentTime = targetTime will play instantly!
+          if (this.videoElement) {
+            this.videoElement.currentTime = targetTime;
+            if (this.shouldBePlaying && this.videoElement.paused) {
+              this.videoElement.play().catch(() => {});
+            }
+          }
+          this.onStatus({ status: 'streaming' });
           return true;
         }
       }
     }
 
-    // 2. Clear unplayed append queue
+    // 2. Find closest preceding keyframe timestamp for clean, instantaneous start
+    let keyframeTime = targetTime;
+    try {
+      const input = new Input({
+        source: new BlobSource(this.file),
+        formats: ALL_FORMATS,
+      });
+      const videoTrack = await input.getPrimaryVideoTrack();
+      if (videoTrack) {
+        const sink = new EncodedPacketSink(videoTrack);
+        const keyPacket = await sink.getKeyPacket(targetTime);
+        if (keyPacket && isFinite(keyPacket.timestamp)) {
+          keyframeTime = Math.max(0, keyPacket.timestamp);
+        }
+      }
+    } catch (e) {
+      console.warn('Keyframe packet lookup note:', e);
+    }
+
+    // 3. Clear unplayed append queue
     this.appendQueue = [];
 
-    // 3. Abort ongoing conversion worker
+    // 4. Abort ongoing conversion worker
     if (this.currentAbortController) {
       this.currentAbortController.abort();
     }
 
-    // 4. Wait for sourceBuffer to finish any current update
+    // 5. Wait for sourceBuffer to finish any current update
     if (this.sourceBuffer && this.sourceBuffer.updating) {
       await new Promise((resolve) => {
         const onUpdateEnd = () => {
@@ -358,18 +420,23 @@ export class MseStreamController {
       });
     }
 
-    // 5. Abort parser state and set timestampOffset to targetTime
+    // 6. Abort parser state and set timestampOffset to keyframeTime
     try {
-      if (this.sourceBuffer) {
+      if (this.sourceBuffer && this.mediaSource.readyState === 'open') {
         this.sourceBuffer.abort();
-        this.sourceBuffer.timestampOffset = targetTime;
+        this.sourceBuffer.timestampOffset = keyframeTime;
       }
     } catch (e) {
       console.warn('SourceBuffer offset note:', e);
     }
 
-    // 6. Start new segment from targetTime
-    await this.startStreamSegment(targetTime);
+    // Prime the video element playhead to the keyframe so the first fragment starts playing immediately
+    if (this.videoElement) {
+      this.videoElement.currentTime = keyframeTime;
+    }
+
+    // 7. Start new segment from keyframeTime
+    await this.startStreamSegment(keyframeTime);
     return false;
   }
 
