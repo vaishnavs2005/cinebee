@@ -1963,11 +1963,6 @@ body {
   border-color: rgba(255, 42, 109, 0.3);
   color: #f472b6;
 }
-.player-track-pill.subtitle {
-  background: rgba(5, 217, 232, 0.12);
-  border-color: rgba(5, 217, 232, 0.3);
-  color: #38bdf8;
-}
 .player-track-pill.clickable {
   cursor: pointer;
 }
@@ -1980,10 +1975,6 @@ body {
   background: rgba(255, 42, 109, 0.22);
   border-color: rgba(255, 42, 109, 0.6);
 }
-.player-track-pill.subtitle.clickable:hover {
-  background: rgba(5, 217, 232, 0.22);
-  border-color: rgba(5, 217, 232, 0.6);
-}
 
 .track-count-badge {
   background: rgba(255, 255, 255, 0.18);
@@ -1991,26 +1982,6 @@ body {
   padding: 1px 6px;
   border-radius: 10px;
   color: #fff;
-}
-
-.player-change-video-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #fff;
-  font-size: 0.76rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-.player-change-video-pill:hover {
-  background: rgba(255, 42, 109, 0.25);
-  border-color: rgba(255, 42, 109, 0.5);
-  transform: translateY(-1px);
 }
 
 /* Track Popover Menus */
@@ -2035,22 +2006,6 @@ body {
   pointer-events: none;
 }
 
-.ctrl-change-video-btn {
-  width: auto !important;
-  padding: 0 14px !important;
-  gap: 6px;
-  border-radius: var(--radius-full) !important;
-  background: rgba(255, 42, 109, 0.14) !important;
-  border: 1px solid rgba(255, 42, 109, 0.35) !important;
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-.ctrl-change-video-btn:hover {
-  background: rgba(255, 42, 109, 0.28) !important;
-  border-color: rgba(255, 42, 109, 0.6) !important;
-  color: #fff !important;
-}
-
 .track-popover-menu {
   position: absolute;
   bottom: 48px;
@@ -2066,10 +2021,6 @@ body {
   display: flex;
   flex-direction: column;
   animation: fadeInSlideUp 0.18s ease-out;
-}
-.track-popover-menu.subtitle-popover {
-  border-color: rgba(5, 217, 232, 0.3);
-  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.8), 0 0 20px rgba(5, 217, 232, 0.15);
 }
 
 @keyframes fadeInSlideUp {
@@ -2138,10 +2089,6 @@ body {
   border-color: rgba(255, 42, 109, 0.35);
   color: #fff;
 }
-.subtitle-popover .track-option-item.selected {
-  background: rgba(5, 217, 232, 0.14);
-  border-color: rgba(5, 217, 232, 0.35);
-}
 
 .track-option-left {
   display: flex;
@@ -2164,11 +2111,6 @@ body {
   border-color: #ff2a6d;
   background: #ff2a6d;
   box-shadow: 0 0 6px rgba(255, 42, 109, 0.6);
-}
-.subtitle-popover .track-radio.checked {
-  border-color: #05d9e8;
-  background: #05d9e8;
-  box-shadow: 0 0 6px rgba(5, 217, 232, 0.6);
 }
 
 .track-option-text {
@@ -2241,16 +2183,6 @@ body {
   margin-top: 4px;
 }
 
-.track-option-item.upload-item {
-  border: 1px dashed rgba(5, 217, 232, 0.35);
-  background: rgba(5, 217, 232, 0.05);
-  margin-top: 4px;
-}
-.track-option-item.upload-item:hover {
-  background: rgba(5, 217, 232, 0.14);
-  border-color: #05d9e8;
-}
-
 /* MKV Error Diagnostics */
 .mkv-error-details {
   margin-top: 14px;
@@ -2271,59 +2203,6 @@ body {
   font-family: var(--font-mono), monospace;
   font-size: 0.75rem;
   color: var(--text-secondary);
-}
-
-/* =========================================================
-   Cinema Subtitle Display Overlay (Dual Native + Custom)
-   ========================================================= */
-
-.cinema-subtitle-overlay {
-  position: absolute;
-  bottom: 28px;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  pointer-events: none;
-  z-index: 15;
-  padding: 0 40px;
-  transition: bottom 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.cinema-subtitle-overlay.controls-up {
-  bottom: 84px;
-}
-
-.cinema-subtitle-text {
-  background: rgba(0, 0, 0, 0.78);
-  backdrop-filter: blur(6px);
-  color: #ffffff;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: clamp(1.05rem, 2.2vw, 1.6rem);
-  font-weight: 600;
-  line-height: 1.4;
-  text-align: center;
-  max-width: 82%;
-  padding: 6px 16px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.85);
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95), 0 0 3px #000;
-  white-space: pre-wrap;
-  word-break: break-word;
-  animation: subFadeIn 0.12s ease-out;
-}
-
-@keyframes subFadeIn {
-  from {
-    opacity: 0.8;
-    transform: scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
 }
 
 
