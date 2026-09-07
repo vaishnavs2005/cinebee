@@ -19,12 +19,15 @@ import {
   Headphones,
   Check,
   Radio,
-  Sliders
+  Sliders,
+  Zap,
+  Loader2
 } from 'lucide-react';
 import FloatingReactions from './FloatingReactions';
 import FullscreenChatOverlay from './FullscreenChatOverlay';
 import { generateSampleMovieBlob } from '../services/sampleVideoGenerator';
 import { parseMkvMetadata } from '../services/mkvParser';
+import { transmuxForBrowser } from '../utils/browserTransmuxer';
 
 function formatTime(seconds) {
   if (!isFinite(seconds) || seconds === null || seconds < 0) return '00:00';
@@ -76,6 +79,10 @@ export default function VideoPlayer({
   const [ambientGlow, setAmbientGlow] = useState(true);
   const [isGeneratingDemo, setIsGeneratingDemo] = useState(false);
   const [videoError, setVideoError] = useState(null);
+  const [isTransmuxing, setIsTransmuxing] = useState(false);
+  const [transmuxProgress, setTransmuxProgress] = useState(0);
+  const [transmuxTime, setTransmuxTime] = useState(0);
+  const abortTransmuxRef = useRef(null);
 
   // MKV Metadata (Audio Settings & Multi-Audio Tracks)
   const [mkvData, setMkvData] = useState(null);
@@ -231,6 +238,54 @@ export default function VideoPlayer({
     } finally {
       setIsGeneratingDemo(false);
     }
+  };
+
+  // Start in-browser remuxing (Copies video lossless, decodes E-AC-3/AC-3 audio to AAC)
+  const handleStartTransmux = async () => {
+    if (!currentFileObj) return;
+    try {
+      setIsTransmuxing(true);
+      setTransmuxProgress(0);
+      setTransmuxTime(0);
+      abortTransmuxRef.current = new AbortController();
+
+      if (onShowToast) {
+        onShowToast('⚡ Repackaging container & converting audio to AAC...');
+      }
+
+      const result = await transmuxForBrowser(
+        currentFileObj,
+        (progress, processedTime) => {
+          setTransmuxProgress(progress);
+          setTransmuxTime(processedTime);
+        },
+        abortTransmuxRef.current.signal,
+        selectedAudioTrackIndex
+      );
+
+      setVideoSrc(result.url);
+      setVideoError(null);
+      setIsPlaying(false);
+      if (onShowToast) {
+        onShowToast('🎉 Ready to play! Video remuxed with browser-compatible AAC audio.');
+      }
+    } catch (err) {
+      console.error('Transmux error:', err);
+      if (onShowToast) {
+        onShowToast(`Auto-fix note: ${err.message}`);
+      }
+      setVideoError(`Could not auto-remux this file: ${err.message}. Try another video.`);
+    } finally {
+      setIsTransmuxing(false);
+    }
+  };
+
+  const handleCancelTransmux = () => {
+    if (abortTransmuxRef.current) {
+      abortTransmuxRef.current.abort();
+    }
+    setIsTransmuxing(false);
+    if (onShowToast) onShowToast('Remuxing cancelled.');
   };
 
   // Listen for video duration and metadata
@@ -584,8 +639,30 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {/* Video Element or Dropzone or Error View */}
-        {videoSrc && !videoError ? (
+        {/* Video Element or Dropzone or Transmuxing or Error View */}
+        {isTransmuxing ? (
+          <div className="transmux-progress-overlay">
+            <div className="transmux-spinner-box">
+              <Zap size={40} className="transmux-zap-icon" />
+            </div>
+            <h3 className="transmux-title">Preparing Movie for Browser Playback</h3>
+            <p className="transmux-desc">
+              Repackaging container & converting Dolby E-AC-3 audio to AAC with <strong>zero video quality loss</strong>...
+            </p>
+            <div className="transmux-progress-bar-container">
+              <div className="transmux-progress-bar" style={{ width: `${transmuxProgress}%` }} />
+            </div>
+            <div className="transmux-progress-meta">
+              <span className="transmux-percent">{transmuxProgress}%</span>
+              {transmuxTime > 0 && (
+                <span className="transmux-time">Processed {formatTime(transmuxTime)}</span>
+              )}
+            </div>
+            <button className="transmux-cancel-btn" onClick={handleCancelTransmux}>
+              Cancel
+            </button>
+          </div>
+        ) : videoSrc && !videoError ? (
           <video
             ref={videoRef}
             src={videoSrc}
@@ -598,7 +675,7 @@ export default function VideoPlayer({
             onError={(e) => {
               console.error('HTML5 video playback error:', e);
               setVideoError(
-                'Unable to decode this video or audio stream natively in your browser. MKV files with H.264 video and AAC / Opus / AC-3 audio work best. Please choose another file or test with the Demo Reel.'
+                'Browser could not decode this video/audio format (common with HEVC/DTS in MKV). Try an MP4 (H.264) or WebM file.'
               );
             }}
           />
@@ -608,7 +685,15 @@ export default function VideoPlayer({
               <AlertTriangle size={42} color="#f43f5e" />
             </div>
             <h3 className="video-error-title">Unable to Play Video</h3>
-            <p className="video-error-desc">{videoError}</p>
+            <p className="video-error-desc">
+              {videoError}
+              {currentFileObj && (
+                <span className="video-error-hint">
+                  <br />
+                  💡 Click <strong>"⚡ Fix & Play in Browser"</strong> below to automatically repackage this file and decode the audio to web AAC without losing video quality!
+                </span>
+              )}
+            </p>
 
             {mkvData && (
               <div className="mkv-error-details">
@@ -623,6 +708,17 @@ export default function VideoPlayer({
             )}
 
             <div className="video-error-actions">
+              {currentFileObj && (
+                <button
+                  className="btn-transmux-fix"
+                  onClick={handleStartTransmux}
+                  disabled={isTransmuxing}
+                  title="Automatically remux container and convert audio to browser-supported AAC"
+                >
+                  <Zap size={18} />
+                  <span>⚡ Fix & Play in Browser</span>
+                </button>
+              )}
               <button
                 className="btn-file-select"
                 onClick={triggerOpenVideoPicker}

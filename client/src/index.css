@@ -2205,4 +2205,185 @@ body {
   color: var(--text-secondary);
 }
 
+.video-error-hint {
+  display: block;
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+/* Transmux Auto-Fix Button */
+.btn-transmux-fix {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 50%, #8b5cf6 100%);
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: var(--radius-full);
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 4px 20px rgba(6, 182, 212, 0.5), 0 0 15px rgba(59, 130, 246, 0.35);
+  transition: all var(--transition-fast);
+  animation: pulse-glow-cyan 2.5s infinite;
+}
+.btn-transmux-fix:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 30px rgba(6, 182, 212, 0.75), 0 0 20px rgba(59, 130, 246, 0.5);
+}
+.btn-transmux-fix:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  animation: none;
+}
+
+@keyframes pulse-glow-cyan {
+  0%, 100% {
+    box-shadow: 0 4px 20px rgba(6, 182, 212, 0.45);
+  }
+  50% {
+    box-shadow: 0 4px 30px rgba(6, 182, 212, 0.8), 0 0 20px rgba(139, 92, 246, 0.5);
+  }
+}
+
+/* Transmuxing Progress Overlay */
+.transmux-progress-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 38px 36px;
+  max-width: 520px;
+  width: 90%;
+  background: rgba(15, 10, 18, 0.96);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(6, 182, 212, 0.5);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85), 0 0 35px rgba(6, 182, 212, 0.25);
+  z-index: 10;
+}
+
+.transmux-spinner-box {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(6, 182, 212, 0.12);
+  border: 2px solid rgba(6, 182, 212, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+  animation: pulse-ring 2s infinite ease-in-out;
+}
+
+.transmux-zap-icon {
+  color: #06b6d4;
+  animation: zap-flash 1.5s infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(6, 182, 212, 0);
+    transform: scale(1.05);
+  }
+}
+
+@keyframes zap-flash {
+  0%, 100% {
+    opacity: 0.8;
+    filter: drop-shadow(0 0 4px #06b6d4);
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 14px #38bdf8);
+  }
+}
+
+.transmux-title {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.transmux-desc {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 22px;
+}
+.transmux-desc strong {
+  color: #38bdf8;
+}
+
+.transmux-progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.transmux-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #06b6d4, #3b82f6, #a855f7);
+  border-radius: var(--radius-full);
+  transition: width 0.25s ease-out;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.6);
+}
+
+.transmux-progress-meta {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
+.transmux-percent {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+.transmux-time {
+  font-family: var(--font-mono);
+}
+
+.transmux-cancel-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  padding: 6px 18px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.transmux-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
 
