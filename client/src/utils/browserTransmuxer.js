@@ -1,4 +1,5 @@
 import { registerAc3Decoder } from '@mediabunny/ac3';
+import { registerAacEncoder } from '@mediabunny/aac-encoder';
 import {
   Input,
   Output,
@@ -16,11 +17,17 @@ export function ensureDecodersRegistered() {
   if (!decodersRegistered) {
     try {
       registerAc3Decoder();
-      decodersRegistered = true;
-      console.log('✅ Mediabunny AC-3 & E-AC-3 WASM decoders registered');
+      console.log('✅ Mediabunny AC-3 & E-AC-3 WASM decoder registered');
     } catch (e) {
       console.warn('Failed to register AC-3 decoder:', e);
     }
+    try {
+      registerAacEncoder();
+      console.log('✅ Mediabunny AAC WASM encoder registered');
+    } catch (e) {
+      console.warn('Failed to register AAC encoder:', e);
+    }
+    decodersRegistered = true;
   }
 }
 
@@ -41,34 +48,37 @@ export async function transmuxForBrowser(file, onProgress, abortSignal, selected
   ensureDecodersRegistered();
 
   const isLargeFile = file.size > 1.8 * 1024 * 1024 * 1024;
-  let target;
   let chunks = [];
-  let format;
 
-  if (isLargeFile) {
-    const writable = new WritableStream({
-      write(chunk) {
-        if (chunk && chunk.data) {
-          chunks.push(chunk.data);
-        }
-      },
-    });
-    target = new StreamTarget(writable, {
-      chunked: true,
-      chunkSize: 8 * 1024 * 1024,
-    });
-    format = new Mp4OutputFormat({ fastStart: 'fragmented' });
-  } else {
-    target = new BufferTarget();
-    format = new Mp4OutputFormat({ fastStart: 'in-memory' });
+  function createTargetAndFormat() {
+    if (isLargeFile) {
+      chunks = [];
+      const writable = new WritableStream({
+        write(chunk) {
+          if (chunk && chunk.data) {
+            chunks.push(chunk.data);
+          }
+        },
+      });
+      const target = new StreamTarget(writable, {
+        chunked: true,
+        chunkSize: 8 * 1024 * 1024,
+      });
+      return { target, format: new Mp4OutputFormat({ fastStart: 'fragmented' }) };
+    } else {
+      const target = new BufferTarget();
+      return { target, format: new Mp4OutputFormat({ fastStart: 'in-memory' }) };
+    }
   }
 
-  const input = new Input({
+  let { target, format } = createTargetAndFormat();
+
+  let input = new Input({
     source: new BlobSource(file),
     formats: ALL_FORMATS,
   });
 
-  const output = new Output({
+  let output = new Output({
     format,
     target,
   });
@@ -84,10 +94,9 @@ export async function transmuxForBrowser(file, onProgress, abortSignal, selected
       },
       audio: (track, n) => {
         const trackIdx = track.number !== undefined ? track.number - 1 : (n !== undefined ? n - 1 : 0);
-        if (trackIdx === selectedAudioTrackIdx || (selectedAudioTrackIdx === 0 && trackIdx === 0)) {
+        if (trackIdx === selectedAudioTrackIdx || trackIdx === 0) {
           return {
-            codec: 'aac',
-            numberOfChannels: 2, // Force downmix 5.1 surround sound to 2-channel stereo for browser WebCodecs compatibility
+            numberOfChannels: 2, // Downmix 5.1 surround sound to 2-channel stereo for universal browser support
             forceTranscode: true,
           };
         }
@@ -96,7 +105,22 @@ export async function transmuxForBrowser(file, onProgress, abortSignal, selected
       showWarnings: false,
     });
   } catch (err) {
-    console.warn('Initial conversion init with audio filter failed, trying primary tracks:', err);
+    console.warn('Initial conversion init with audio filter failed, trying primary tracks with fresh output:', err);
+    // Create completely fresh target, format, input, and output
+    const fresh = createTargetAndFormat();
+    target = fresh.target;
+    format = fresh.format;
+
+    input = new Input({
+      source: new BlobSource(file),
+      formats: ALL_FORMATS,
+    });
+
+    output = new Output({
+      format,
+      target,
+    });
+
     conversion = await Conversion.init({
       input,
       output,
@@ -105,8 +129,7 @@ export async function transmuxForBrowser(file, onProgress, abortSignal, selected
         forceTranscode: false,
       },
       audio: {
-        codec: 'aac',
-        numberOfChannels: 2, // Force downmix 5.1 surround sound to 2-channel stereo for browser WebCodecs compatibility
+        numberOfChannels: 2,
         forceTranscode: true,
       },
       showWarnings: false,
