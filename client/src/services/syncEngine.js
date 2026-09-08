@@ -1,5 +1,23 @@
 import { io } from 'socket.io-client';
 
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+    ],
+    username: 'openrelay',
+    credential: 'openrelay',
+  },
+];
+
 class SyncEngine {
   constructor() {
     this.socket = null;
@@ -10,9 +28,11 @@ class SyncEngine {
     this.lastKnownDrift = 0;
     
     // WebRTC properties
-    this.peers = new Map();
+    this.peers = new Map(); // targetId -> RTCPeerConnection
+    this.pendingIceCandidates = new Map(); // targetId -> Array<candidate>
     this.localAudioStream = null;
     this.isVoiceChatStarted = false;
+    this.hasMicPermission = false;
 
     this.callbacks = {
       onConnect: () => {},
@@ -61,8 +81,9 @@ class SyncEngine {
     });
 
     this.socket.on('user_joined', (data) => {
-      if (this.isVoiceChatStarted) {
-        this._createPeerConnection(data.user.id, true);
+      console.log('⚡ User joined room:', data.user);
+      if (this.isVoiceChatStarted && data.user.id !== this.socket.id) {
+        this._ensurePeerConnection(data.user.id);
       }
       this.callbacks.onUserJoined(data.user);
     });
@@ -125,25 +146,50 @@ class SyncEngine {
 
     // WebRTC Signaling
     this.socket.on('webrtc_offer', async ({ senderId, offer }) => {
-      if (!this.isVoiceChatStarted) await this.startVoiceChat();
-      const pc = this._createPeerConnection(senderId, false);
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      this.socket.emit('webrtc_answer', { targetId: senderId, answer });
+      console.log(`[SyncEngine] 📩 Received webrtc_offer from ${senderId}`);
+      try {
+        let pc = this.peers.get(senderId);
+        if (!pc) {
+          pc = this._createPeerConnection(senderId, false);
+        }
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        await this._flushIceCandidates(senderId, pc);
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        this.socket.emit('webrtc_answer', { targetId: senderId, answer });
+        console.log(`[SyncEngine] 📤 Sent webrtc_answer to ${senderId}`);
+      } catch (err) {
+        console.error(`[SyncEngine] Error handling offer from ${senderId}:`, err);
+      }
     });
 
     this.socket.on('webrtc_answer', async ({ senderId, answer }) => {
-      const pc = this.peers.get(senderId);
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      console.log(`[SyncEngine] 📩 Received webrtc_answer from ${senderId}`);
+      try {
+        const pc = this.peers.get(senderId);
+        if (pc) {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          await this._flushIceCandidates(senderId, pc);
+        }
+      } catch (err) {
+        console.error(`[SyncEngine] Error handling answer from ${senderId}:`, err);
       }
     });
 
     this.socket.on('webrtc_ice_candidate', async ({ senderId, candidate }) => {
-      const pc = this.peers.get(senderId);
-      if (pc) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      try {
+        const pc = this.peers.get(senderId);
+        if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } else {
+          if (!this.pendingIceCandidates.has(senderId)) {
+            this.pendingIceCandidates.set(senderId, []);
+          }
+          this.pendingIceCandidates.get(senderId).push(candidate);
+        }
+      } catch (err) {
+        console.warn(`[SyncEngine] Error adding ICE candidate from ${senderId}:`, err);
       }
     });
 
@@ -259,86 +305,187 @@ class SyncEngine {
 
   // --- WebRTC Voice Chat Methods ---
 
-  async startVoiceChat(existingUsers = []) {
-    if (this.isVoiceChatStarted || !this.socket) return;
+  async acquireLocalMedia() {
+    if (this.localAudioStream) return this.localAudioStream;
     try {
-      this.localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Start muted
+      this.localAudioStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      // Start muted for safety
       this.localAudioStream.getAudioTracks().forEach(track => {
         track.enabled = false;
       });
-      this.isVoiceChatStarted = true;
+      this.hasMicPermission = true;
 
-      // Connect to all existing users
-      for (const user of existingUsers) {
-        if (user.id !== this.socket.id) {
-          this._createPeerConnection(user.id, true);
+      // Attach track to all existing active peer connections
+      const audioTrack = this.localAudioStream.getAudioTracks()[0];
+      if (audioTrack) {
+        for (const [targetId, pc] of this.peers.entries()) {
+          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+          if (sender) {
+            await sender.replaceTrack(audioTrack);
+          } else {
+            pc.addTrack(audioTrack, this.localAudioStream);
+          }
         }
       }
+      return this.localAudioStream;
     } catch (err) {
-      console.error('Microphone access denied:', err);
-      throw err;
+      console.warn('[SyncEngine] Microphone permission not granted or unavailable:', err);
+      this.hasMicPermission = false;
+      return null;
     }
   }
 
-  setMicEnabled(enabled) {
-    if (!this.localAudioStream || !this.socket || !this.roomId) return;
-    this.localAudioStream.getAudioTracks().forEach(track => {
-      track.enabled = enabled;
-    });
+  async initVoiceChat(existingUsers = []) {
+    if (!this.socket) return;
+    this.isVoiceChatStarted = true;
 
-    if (enabled) {
-      this.socket.emit('voice_start', { roomId: this.roomId });
-    } else {
-      this.socket.emit('voice_end', { roomId: this.roomId });
+    // Try to acquire mic early (starts muted). If denied, user can still hear others in recvonly mode.
+    await this.acquireLocalMedia();
+
+    // Connect to all existing users in the room
+    for (const user of existingUsers) {
+      if (user.id !== this.socket.id) {
+        this._ensurePeerConnection(user.id);
+      }
     }
+  }
+
+  _ensurePeerConnection(targetId) {
+    if (this.peers.has(targetId)) return this.peers.get(targetId);
+    // Deterministic initiator: lexicographically smaller socket ID initiates to avoid glare
+    const isInitiator = !this.socket ? false : this.socket.id < targetId;
+    return this._createPeerConnection(targetId, isInitiator);
+  }
+
+  setMicEnabled(enabled) {
+    if (!this.localAudioStream) {
+      console.warn('[SyncEngine] Cannot toggle mic: localAudioStream is not active');
+      return false;
+    }
+    this.localAudioStream.getAudioTracks().forEach(track => {
+      track.enabled = Boolean(enabled);
+    });
+    console.log(`[SyncEngine] 🎤 Microphone ${enabled ? 'ENABLED' : 'MUTED'}`);
+
+    if (this.socket && this.roomId) {
+      this.socket.emit(enabled ? 'voice_start' : 'voice_end', { roomId: this.roomId });
+    }
+    return true;
   }
 
   _createPeerConnection(targetId, isInitiator) {
     if (this.peers.has(targetId)) return this.peers.get(targetId);
 
+    console.log(`[SyncEngine] 🛠️ Creating PeerConnection with ${targetId} (initiator: ${isInitiator})`);
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-      ],
+      iceServers: ICE_SERVERS,
     });
 
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
+      if (event.candidate && this.socket) {
         this.socket.emit('webrtc_ice_candidate', { targetId, candidate: event.candidate });
       }
     };
 
     pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        this.callbacks.onVoiceStream(targetId, event.streams[0]);
+      console.log(`[SyncEngine] 🎧 Received remote audio track from ${targetId}`, event);
+      const stream = (event.streams && event.streams[0]) || new MediaStream([event.track]);
+      this.callbacks.onVoiceStream(targetId, stream);
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log(`[SyncEngine] 📡 Peer ${targetId} connectionState: ${pc.connectionState}`);
+      if (pc.connectionState === 'connected') {
+        console.log(`[SyncEngine] 🎉 WebRTC Audio Connected with peer ${targetId}!`);
+      } else if (pc.connectionState === 'failed') {
+        console.warn(`[SyncEngine] Peer connection failed with ${targetId}`);
       }
     };
 
-    if (this.localAudioStream) {
-      this.localAudioStream.getTracks().forEach(track => {
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[SyncEngine] 🧊 Peer ${targetId} iceConnectionState: ${pc.iceConnectionState}`);
+    };
+
+    // Attach local audio track if available, else add recvonly transceiver so audio is received
+    if (this.localAudioStream && this.localAudioStream.getAudioTracks().length > 0) {
+      this.localAudioStream.getAudioTracks().forEach(track => {
         pc.addTrack(track, this.localAudioStream);
       });
+    } else {
+      try {
+        pc.addTransceiver('audio', { direction: 'recvonly' });
+      } catch (err) {
+        console.warn('[SyncEngine] addTransceiver error:', err);
+      }
     }
 
     if (isInitiator) {
-      pc.createOffer().then(offer => {
-        return pc.setLocalDescription(offer);
-      }).then(() => {
-        this.socket.emit('webrtc_offer', { targetId, offer: pc.localDescription });
-      }).catch(err => console.error('Error creating offer:', err));
+      pc.createOffer({ offerToReceiveAudio: true })
+        .then(offer => pc.setLocalDescription(offer))
+        .then(() => {
+          if (this.socket) {
+            this.socket.emit('webrtc_offer', { targetId, offer: pc.localDescription });
+            console.log(`[SyncEngine] 📤 Sent webrtc_offer to ${targetId}`);
+          }
+        })
+        .catch(err => console.error('[SyncEngine] Error creating offer:', err));
     }
 
     this.peers.set(targetId, pc);
     return pc;
   }
 
+  async _flushIceCandidates(targetId, pc) {
+    const queue = this.pendingIceCandidates.get(targetId);
+    if (queue && queue.length > 0) {
+      console.log(`[SyncEngine] Flushing ${queue.length} queued ICE candidates for ${targetId}`);
+      while (queue.length > 0) {
+        const candidate = queue.shift();
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.warn(`[SyncEngine] Error adding queued ICE candidate for ${targetId}:`, err);
+        }
+      }
+    }
+    this.pendingIceCandidates.delete(targetId);
+  }
+
   _removePeerConnection(targetId) {
     const pc = this.peers.get(targetId);
     if (pc) {
-      pc.close();
+      try {
+        pc.close();
+      } catch (err) {
+        console.warn(err);
+      }
       this.peers.delete(targetId);
     }
+    this.pendingIceCandidates.delete(targetId);
+  }
+
+  cleanupVoiceChat() {
+    this.isVoiceChatStarted = false;
+    if (this.localAudioStream) {
+      this.localAudioStream.getTracks().forEach(track => track.stop());
+      this.localAudioStream = null;
+    }
+    for (const [targetId, pc] of this.peers.entries()) {
+      try {
+        pc.close();
+      } catch (err) {
+        console.warn(err);
+      }
+    }
+    this.peers.clear();
+    this.pendingIceCandidates.clear();
+    this.hasMicPermission = false;
   }
 }
 

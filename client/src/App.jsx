@@ -15,6 +15,42 @@ function formatTime(seconds) {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+function RemoteAudio({ stream, userId }) {
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !stream) return;
+
+    el.srcObject = stream;
+    el.volume = 1.0;
+
+    const playStream = () => {
+      const playPromise = el.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          console.log(`🔊 [RemoteAudio] Playing audio from peer: ${userId}`);
+        }).catch(err => {
+          console.warn(`⚠️ [RemoteAudio] Autoplay blocked for ${userId}, waiting for user gesture:`, err);
+          const resumeAudio = () => {
+            el.play().catch(() => {});
+            window.removeEventListener('click', resumeAudio);
+            window.removeEventListener('keydown', resumeAudio);
+            window.removeEventListener('touchstart', resumeAudio);
+          };
+          window.addEventListener('click', resumeAudio, { once: true });
+          window.addEventListener('keydown', resumeAudio, { once: true });
+          window.addEventListener('touchstart', resumeAudio, { once: true });
+        });
+      }
+    };
+
+    playStream();
+  }, [stream, userId]);
+
+  return <audio ref={audioRef} autoPlay playsInline style={{ display: 'none' }} />;
+}
+
 export default function App() {
   const [roomId, setRoomId] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -48,6 +84,11 @@ export default function App() {
 
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
   useEffect(() => { isOpenMicActiveRef.current = isOpenMicActive; }, [isOpenMicActive]);
+  useEffect(() => {
+    return () => {
+      syncEngine.cleanupVoiceChat();
+    };
+  }, []);
 
   const videoRef = useRef(null);
   const changeVideoTriggerRef = useRef(null);
@@ -97,6 +138,16 @@ export default function App() {
       },
       onUserLeft: (data) => {
         showToast(`${data.username} left the room`);
+        setPeerStreams(prev => {
+          const next = { ...prev };
+          delete next[data.userId];
+          return next;
+        });
+        setActiveSpeakers(prev => {
+          const next = new Set(prev);
+          next.delete(data.userId);
+          return next;
+        });
         setMessages((prev) => [
           ...prev,
           {
@@ -186,9 +237,16 @@ export default function App() {
           if (!isMicActiveRef.current) {
             isMicActiveRef.current = true;
             try {
-              await syncEngine.startVoiceChat(users);
-              syncEngine.setMicEnabled(true);
-              setActiveSpeakers(prev => new Set([...prev, 'local']));
+              if (!syncEngine.localAudioStream) {
+                await syncEngine.acquireLocalMedia();
+              }
+              const ok = syncEngine.setMicEnabled(true);
+              if (ok) {
+                setActiveSpeakers(prev => new Set([...prev, 'local']));
+              } else {
+                showToast('Microphone access required to speak.');
+                isMicActiveRef.current = false;
+              }
             } catch (err) {
               showToast('Microphone access required for voice chat.');
               isMicActiveRef.current = false;
@@ -199,14 +257,21 @@ export default function App() {
           const nextState = !isOpenMicActiveRef.current;
           try {
             if (nextState) {
-              await syncEngine.startVoiceChat(users);
-              syncEngine.setMicEnabled(true);
-              setActiveSpeakers(prev => new Set([...prev, 'local']));
+              if (!syncEngine.localAudioStream) {
+                await syncEngine.acquireLocalMedia();
+              }
+              const ok = syncEngine.setMicEnabled(true);
+              if (ok) {
+                setActiveSpeakers(prev => new Set([...prev, 'local']));
+                setIsOpenMicActive(true);
+              } else {
+                showToast('Microphone not available.');
+              }
             } else {
               syncEngine.setMicEnabled(false);
               setActiveSpeakers(prev => { const next = new Set(prev); next.delete('local'); return next; });
+              setIsOpenMicActive(false);
             }
-            setIsOpenMicActive(nextState);
           } catch(err) {
             showToast('Microphone access required.');
           }
@@ -261,14 +326,21 @@ export default function App() {
     const nextState = !isOpenMicActive;
     try {
       if (nextState) {
-        await syncEngine.startVoiceChat(users);
-        syncEngine.setMicEnabled(true);
-        setActiveSpeakers(prev => new Set([...prev, 'local']));
+        if (!syncEngine.localAudioStream) {
+          await syncEngine.acquireLocalMedia();
+        }
+        const ok = syncEngine.setMicEnabled(true);
+        if (ok) {
+          setActiveSpeakers(prev => new Set([...prev, 'local']));
+          setIsOpenMicActive(true);
+        } else {
+          showToast('Microphone not available.');
+        }
       } else {
         syncEngine.setMicEnabled(false);
         setActiveSpeakers(prev => { const next = new Set(prev); next.delete('local'); return next; });
+        setIsOpenMicActive(false);
       }
-      setIsOpenMicActive(nextState);
     } catch(err) {
       showToast('Microphone access required.');
     }
@@ -295,6 +367,11 @@ export default function App() {
           time: videoRef.current.currentTime,
           playing: !videoRef.current.paused,
         };
+      });
+
+      // Initialize voice chat connection with users in the room
+      syncEngine.initVoiceChat(response.users).catch(err => {
+        console.warn('Voice chat initialization notice:', err);
       });
 
       showToast(`Joined room: ${response.roomId.toUpperCase()}`);
@@ -471,15 +548,7 @@ export default function App() {
 
       {/* Render Remote Audio Streams */}
       {Object.entries(peerStreams).map(([userId, stream]) => (
-        <audio
-          key={userId}
-          autoPlay
-          ref={(audioEl) => {
-            if (audioEl && audioEl.srcObject !== stream) {
-              audioEl.srcObject = stream;
-            }
-          }}
-        />
+        <RemoteAudio key={userId} userId={userId} stream={stream} />
       ))}
 
       {/* Toast Notifications */}
