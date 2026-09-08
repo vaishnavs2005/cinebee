@@ -190,6 +190,7 @@ export default function RoomModal({
 
         <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
           <div>🔒 Video files are loaded 100% locally. Zero server upload.</div>
+          <div>🎙️ Voice Chat included! Hold <strong>'Z'</strong> to talk once inside.</div>
           <button
             type="button"
             onClick={onOpenInfo}

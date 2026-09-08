@@ -37,6 +37,18 @@ export default function App() {
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
 
+  // Walkie-Talkie State
+  const [activeSpeakers, setActiveSpeakers] = useState(new Set());
+  const [peerStreams, setPeerStreams] = useState({}); // { userId: stream }
+  const [voiceMode, setVoiceMode] = useState('ptt');
+  const [isOpenMicActive, setIsOpenMicActive] = useState(false);
+  const isMicActiveRef = useRef(false);
+  const voiceModeRef = useRef(voiceMode);
+  const isOpenMicActiveRef = useRef(isOpenMicActive);
+
+  useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+  useEffect(() => { isOpenMicActiveRef.current = isOpenMicActive; }, [isOpenMicActive]);
+
   const videoRef = useRef(null);
   const changeVideoTriggerRef = useRef(null);
 
@@ -133,6 +145,19 @@ export default function App() {
       onActionRejected: (data) => {
         showToast(`⚠️ ${data.reason || 'Action rejected'}`);
       },
+      onVoiceStart: (senderId) => {
+        setActiveSpeakers(prev => new Set([...prev, senderId]));
+      },
+      onVoiceEnd: (senderId) => {
+        setActiveSpeakers(prev => {
+          const next = new Set(prev);
+          next.delete(senderId);
+          return next;
+        });
+      },
+      onVoiceStream: (senderId, stream) => {
+        setPeerStreams(prev => ({ ...prev, [senderId]: stream }));
+      },
     });
 
     // Provide local state on peer resync request
@@ -144,6 +169,110 @@ export default function App() {
       };
     };
   }, [showToast]);
+
+  // Walkie-Talkie 'M' Key handling
+  useEffect(() => {
+    const handleKeyDown = async (e) => {
+      if (e.repeat) return; // Ignore hold repetition
+      const tag = document.activeElement?.tagName;
+      if (['INPUT', 'TEXTAREA'].includes(tag) || document.activeElement?.isContentEditable) {
+        return;
+      }
+      
+      if ((e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z') && roomId) {
+        e.preventDefault();
+        
+        if (voiceModeRef.current === 'ptt') {
+          if (!isMicActiveRef.current) {
+            isMicActiveRef.current = true;
+            try {
+              await syncEngine.startVoiceChat(users);
+              syncEngine.setMicEnabled(true);
+              setActiveSpeakers(prev => new Set([...prev, 'local']));
+            } catch (err) {
+              showToast('Microphone access required for voice chat.');
+              isMicActiveRef.current = false;
+            }
+          }
+        } else if (voiceModeRef.current === 'open') {
+          // Toggle Open Mic state
+          const nextState = !isOpenMicActiveRef.current;
+          try {
+            if (nextState) {
+              await syncEngine.startVoiceChat(users);
+              syncEngine.setMicEnabled(true);
+              setActiveSpeakers(prev => new Set([...prev, 'local']));
+            } else {
+              syncEngine.setMicEnabled(false);
+              setActiveSpeakers(prev => { const next = new Set(prev); next.delete('local'); return next; });
+            }
+            setIsOpenMicActive(nextState);
+          } catch(err) {
+            showToast('Microphone access required.');
+          }
+        }
+      }
+    };
+
+    const handleKeyUp = (e) => {
+      const tag = document.activeElement?.tagName;
+      if (['INPUT', 'TEXTAREA'].includes(tag) || document.activeElement?.isContentEditable) {
+        return;
+      }
+
+      if (e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z') {
+        e.preventDefault();
+        if (voiceModeRef.current === 'ptt') {
+          if (isMicActiveRef.current) {
+            isMicActiveRef.current = false;
+            syncEngine.setMicEnabled(false);
+            setActiveSpeakers(prev => {
+              const next = new Set(prev);
+              next.delete('local');
+              return next;
+            });
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [roomId, users, showToast]);
+
+  // Voice Chat UI Handlers
+  const handleToggleVoiceMode = () => {
+    setVoiceMode(prev => prev === 'ptt' ? 'open' : 'ptt');
+    // Reset mic state when switching modes
+    if (isMicActiveRef.current || isOpenMicActive) {
+      syncEngine.setMicEnabled(false);
+      isMicActiveRef.current = false;
+      setIsOpenMicActive(false);
+      setActiveSpeakers(prev => { const next = new Set(prev); next.delete('local'); return next; });
+    }
+  };
+
+  const handleToggleMic = async () => {
+    if (voiceMode === 'ptt') return; // Mic button only toggles in Open Mic mode
+    const nextState = !isOpenMicActive;
+    try {
+      if (nextState) {
+        await syncEngine.startVoiceChat(users);
+        syncEngine.setMicEnabled(true);
+        setActiveSpeakers(prev => new Set([...prev, 'local']));
+      } else {
+        syncEngine.setMicEnabled(false);
+        setActiveSpeakers(prev => { const next = new Set(prev); next.delete('local'); return next; });
+      }
+      setIsOpenMicActive(nextState);
+    } catch(err) {
+      showToast('Microphone access required.');
+    }
+  };
 
   // Join Room Handler
   const handleJoinRoom = async (targetRoomId, username, initialMode = null) => {
@@ -232,6 +361,10 @@ export default function App() {
         onShowToast={showToast}
         onOpenInfo={() => setIsInfoModalOpen(true)}
         onChangeVideo={() => changeVideoTriggerRef.current?.()}
+        voiceMode={voiceMode}
+        isOpenMicActive={isOpenMicActive || isMicActiveRef.current}
+        onToggleVoiceMode={handleToggleVoiceMode}
+        onToggleMic={handleToggleMic}
       />
 
       {/* Main Cinema Workspace */}
@@ -305,6 +438,49 @@ export default function App() {
         isOpen={isInfoModalOpen}
         onClose={() => setIsInfoModalOpen(false)}
       />
+
+      {/* Walkie Talkie UI Indicator */}
+      {activeSpeakers.size > 0 && (
+        <div className="walkie-talkie-indicator" style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(0, 0, 0, 0.8)',
+          color: '#fff',
+          padding: '8px 16px',
+          borderRadius: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          zIndex: 9999,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          border: '1px solid var(--accent-primary)',
+          animation: 'pulse 1.5s infinite',
+        }}>
+          <span style={{ fontSize: '1.2rem' }}>🎙️</span>
+          <span style={{ fontWeight: 500 }}>
+            {Array.from(activeSpeakers).map(id => {
+              if (id === 'local') return 'You';
+              const user = users.find(u => u.id === id);
+              return user ? user.username : 'Someone';
+            }).join(', ')} speaking...
+          </span>
+        </div>
+      )}
+
+      {/* Render Remote Audio Streams */}
+      {Object.entries(peerStreams).map(([userId, stream]) => (
+        <audio
+          key={userId}
+          autoPlay
+          ref={(audioEl) => {
+            if (audioEl && audioEl.srcObject !== stream) {
+              audioEl.srcObject = stream;
+            }
+          }}
+        />
+      ))}
 
       {/* Toast Notifications */}
       <div className="toast-container" aria-live="polite">

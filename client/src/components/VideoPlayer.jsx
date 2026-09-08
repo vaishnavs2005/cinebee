@@ -723,10 +723,6 @@ export default function VideoPlayer({
         e.stopPropagation();
         handleRelativeSeek(10);
         resetControlsTimer();
-      } else if (e.code === 'KeyM' || e.key === 'm' || e.key === 'M') {
-        e.preventDefault();
-        toggleMute();
-        resetControlsTimer();
       } else if (e.code === 'KeyF' || e.key === 'f' || e.key === 'F') {
         e.preventDefault();
         toggleFullscreen();

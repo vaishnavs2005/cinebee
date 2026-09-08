@@ -8,6 +8,12 @@ class SyncEngine {
     this.isApplyingRemoteAction = false;
     this.heartbeatTimer = null;
     this.lastKnownDrift = 0;
+    
+    // WebRTC properties
+    this.peers = new Map();
+    this.localAudioStream = null;
+    this.isVoiceChatStarted = false;
+
     this.callbacks = {
       onConnect: () => {},
       onDisconnect: () => {},
@@ -22,6 +28,9 @@ class SyncEngine {
       onPartnerFileInfo: () => {},
       onControlModeChanged: () => {},
       onActionRejected: () => {},
+      onVoiceStart: () => {},
+      onVoiceEnd: () => {},
+      onVoiceStream: () => {},
     };
   }
 
@@ -52,10 +61,14 @@ class SyncEngine {
     });
 
     this.socket.on('user_joined', (data) => {
+      if (this.isVoiceChatStarted) {
+        this._createPeerConnection(data.user.id, true);
+      }
       this.callbacks.onUserJoined(data.user);
     });
 
     this.socket.on('user_left', (data) => {
+      this._removePeerConnection(data.userId);
       this.callbacks.onUserLeft(data);
     });
 
@@ -108,6 +121,38 @@ class SyncEngine {
 
     this.socket.on('action_rejected', (data) => {
       this.callbacks.onActionRejected(data);
+    });
+
+    // WebRTC Signaling
+    this.socket.on('webrtc_offer', async ({ senderId, offer }) => {
+      if (!this.isVoiceChatStarted) await this.startVoiceChat();
+      const pc = this._createPeerConnection(senderId, false);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      this.socket.emit('webrtc_answer', { targetId: senderId, answer });
+    });
+
+    this.socket.on('webrtc_answer', async ({ senderId, answer }) => {
+      const pc = this.peers.get(senderId);
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      }
+    });
+
+    this.socket.on('webrtc_ice_candidate', async ({ senderId, candidate }) => {
+      const pc = this.peers.get(senderId);
+      if (pc) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    });
+
+    this.socket.on('voice_start', ({ senderId }) => {
+      this.callbacks.onVoiceStart(senderId);
+    });
+
+    this.socket.on('voice_end', ({ senderId }) => {
+      this.callbacks.onVoiceEnd(senderId);
     });
   }
 
@@ -209,6 +254,90 @@ class SyncEngine {
       setTimeout(() => {
         this.isApplyingRemoteAction = false;
       }, 350);
+    }
+  }
+
+  // --- WebRTC Voice Chat Methods ---
+
+  async startVoiceChat(existingUsers = []) {
+    if (this.isVoiceChatStarted || !this.socket) return;
+    try {
+      this.localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Start muted
+      this.localAudioStream.getAudioTracks().forEach(track => {
+        track.enabled = false;
+      });
+      this.isVoiceChatStarted = true;
+
+      // Connect to all existing users
+      for (const user of existingUsers) {
+        if (user.id !== this.socket.id) {
+          this._createPeerConnection(user.id, true);
+        }
+      }
+    } catch (err) {
+      console.error('Microphone access denied:', err);
+      throw err;
+    }
+  }
+
+  setMicEnabled(enabled) {
+    if (!this.localAudioStream || !this.socket || !this.roomId) return;
+    this.localAudioStream.getAudioTracks().forEach(track => {
+      track.enabled = enabled;
+    });
+
+    if (enabled) {
+      this.socket.emit('voice_start', { roomId: this.roomId });
+    } else {
+      this.socket.emit('voice_end', { roomId: this.roomId });
+    }
+  }
+
+  _createPeerConnection(targetId, isInitiator) {
+    if (this.peers.has(targetId)) return this.peers.get(targetId);
+
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+      ],
+    });
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        this.socket.emit('webrtc_ice_candidate', { targetId, candidate: event.candidate });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      if (event.streams && event.streams[0]) {
+        this.callbacks.onVoiceStream(targetId, event.streams[0]);
+      }
+    };
+
+    if (this.localAudioStream) {
+      this.localAudioStream.getTracks().forEach(track => {
+        pc.addTrack(track, this.localAudioStream);
+      });
+    }
+
+    if (isInitiator) {
+      pc.createOffer().then(offer => {
+        return pc.setLocalDescription(offer);
+      }).then(() => {
+        this.socket.emit('webrtc_offer', { targetId, offer: pc.localDescription });
+      }).catch(err => console.error('Error creating offer:', err));
+    }
+
+    this.peers.set(targetId, pc);
+    return pc;
+  }
+
+  _removePeerConnection(targetId) {
+    const pc = this.peers.get(targetId);
+    if (pc) {
+      pc.close();
+      this.peers.delete(targetId);
     }
   }
 }

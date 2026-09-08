@@ -294,6 +294,45 @@ io.on('connection', (socket) => {
     io.to(cleanRoomId).emit('chat_message', message);
   });
 
+  // WebRTC Signaling for Voice Chat
+  socket.on('webrtc_offer', ({ targetId, offer }) => {
+    io.to(targetId).emit('webrtc_offer', {
+      senderId: socket.id,
+      offer,
+    });
+  });
+
+  socket.on('webrtc_answer', ({ targetId, answer }) => {
+    io.to(targetId).emit('webrtc_answer', {
+      senderId: socket.id,
+      answer,
+    });
+  });
+
+  socket.on('webrtc_ice_candidate', ({ targetId, candidate }) => {
+    io.to(targetId).emit('webrtc_ice_candidate', {
+      senderId: socket.id,
+      candidate,
+    });
+  });
+
+  // Voice Chat UI Indicators
+  socket.on('voice_start', ({ roomId }) => {
+    const cleanRoomId = (roomId || currentRoomId)?.trim().toLowerCase();
+    if (!cleanRoomId) return;
+    socket.to(cleanRoomId).emit('voice_start', {
+      senderId: socket.id,
+    });
+  });
+
+  socket.on('voice_end', ({ roomId }) => {
+    const cleanRoomId = (roomId || currentRoomId)?.trim().toLowerCase();
+    if (!cleanRoomId) return;
+    socket.to(cleanRoomId).emit('voice_end', {
+      senderId: socket.id,
+    });
+  });
+
   // Emoji Reactions
   socket.on('reaction', ({ roomId, emoji }) => {
     const cleanRoomId = (roomId || currentRoomId)?.trim().toLowerCase();

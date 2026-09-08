@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Share2, Check, Users, Shield, Radio, Copy, HelpCircle, Upload } from 'lucide-react';
+import { Share2, Check, Users, Shield, Radio, Copy, HelpCircle, Upload, Mic, MicOff, Settings2 } from 'lucide-react';
 import logoImg from '../assets/logo.png';
 
 export default function Header({
@@ -13,6 +13,10 @@ export default function Header({
   onShowToast,
   onOpenInfo,
   onChangeVideo,
+  voiceMode = 'ptt',
+  isOpenMicActive = false,
+  onToggleVoiceMode,
+  onToggleMic,
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -76,6 +80,50 @@ export default function Header({
       </div>
 
       <div className="header-right">
+        {/* Voice Chat Controls */}
+        <div className="voice-chat-controls" style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          background: 'rgba(255, 255, 255, 0.05)',
+          padding: '4px',
+          borderRadius: '20px',
+          marginRight: '12px',
+        }}>
+          <button
+            onClick={onToggleVoiceMode}
+            className="ctrl-btn"
+            title={`Current Voice Mode: ${voiceMode === 'ptt' ? 'Push-To-Talk' : 'Open Mic'} (Click to change)`}
+            style={{ fontSize: '0.75rem', fontWeight: 600, padding: '4px 8px', borderRadius: '12px' }}
+          >
+            <Settings2 size={12} style={{ marginRight: '4px' }} />
+            {voiceMode === 'ptt' ? 'PTT' : 'OPEN'}
+          </button>
+          
+          <button
+            onClick={onToggleMic}
+            className={`ctrl-btn ${isOpenMicActive ? 'active' : ''}`}
+            title={
+              voiceMode === 'ptt' 
+                ? "Push-To-Talk: Hold 'Z' to speak" 
+                : "Open Mic: Click or press 'Z' to toggle mute"
+            }
+            style={{ 
+              borderRadius: '50%', 
+              width: '28px', 
+              height: '28px', 
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: isOpenMicActive ? 'var(--accent-primary)' : 'transparent',
+              color: isOpenMicActive ? '#fff' : 'var(--text-secondary)'
+            }}
+          >
+            {isOpenMicActive ? <Mic size={14} /> : <MicOff size={14} />}
+          </button>
+        </div>
+
         {isHost ? (
           <div className="mode-toggle" title="Playback Control Permission">
             <button
