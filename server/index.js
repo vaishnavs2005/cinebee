@@ -13,20 +13,23 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
 
-// Self-signed certificate for local HTTPS (enables microphone / getUserMedia across LAN devices)
+// Self-signed certificate for local HTTPS (enables microphone / getUserMedia across LAN devices).
+// On cloud hosts like Render, HTTPS is handled automatically by the cloud proxy on process.env.PORT.
 let httpsServer = null;
-try {
-  const pems = await selfsigned.generate(
-    [
-      { name: 'commonName', value: 'meowvie.local' },
-      { name: 'organizationName', value: 'Meowvie' },
-    ],
-    { days: 365 }
-  );
-  httpsServer = https.createServer({ key: pems.private, cert: pems.cert }, app);
-  console.log('🔒 Generated in-memory SSL certificate for secure LAN voice chat');
-} catch (sslErr) {
-  console.warn('⚠️ Could not generate self-signed certificate for HTTPS:', sslErr.message);
+if (!process.env.RENDER) {
+  try {
+    const pems = await selfsigned.generate(
+      [
+        { name: 'commonName', value: 'meowvie.local' },
+        { name: 'organizationName', value: 'Meowvie' },
+      ],
+      { days: 365 }
+    );
+    httpsServer = https.createServer({ key: pems.private, cert: pems.cert }, app);
+    console.log('🔒 Generated in-memory SSL certificate for secure LAN voice chat');
+  } catch (sslErr) {
+    console.warn('⚠️ Could not generate self-signed certificate for HTTPS:', sslErr.message);
+  }
 }
 
 const PORT = process.env.PORT || 3001;
@@ -546,10 +549,13 @@ app.get('*', (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🍿 Meowvie HTTP server listening on port ${PORT}`);
+  console.log(`🍿 Meowvie server listening on port ${PORT}`);
 });
 
-if (httpsServer) {
+if (httpsServer && !process.env.RENDER) {
+  httpsServer.on('error', (err) => {
+    console.warn('⚠️ Local HTTPS server error:', err.message);
+  });
   httpsServer.listen(HTTPS_PORT, () => {
     console.log(`🔒 Meowvie HTTPS server (Microphone / Secure Context enabled) listening on port ${HTTPS_PORT}`);
   });
