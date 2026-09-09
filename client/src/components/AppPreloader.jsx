@@ -104,7 +104,7 @@ export default function AppPreloader({ onReady, onLoaded }) {
               lineHeight: 1.1,
             }}
           >
-            MEOWVIE
+            LOADING...
           </h2>
           <div
             style={{
