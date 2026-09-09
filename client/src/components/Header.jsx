@@ -22,6 +22,7 @@ export default function Header({
   onToggleMic,
   onPttStart,
   onPttEnd,
+  className = '',
 }) {
   const [copied, setCopied] = useState(false);
   const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
@@ -56,7 +57,7 @@ export default function Header({
   const micIsLive = voiceMode === 'ptt' ? isSpeaking : isOpenMicActive;
 
   return (
-    <header className="app-header">
+    <header className={`app-header ${className}`.trim()}>
 
       {/* ── LEFT: Brand + Info ──────────────────────────────────── */}
       <div className="brand-section">

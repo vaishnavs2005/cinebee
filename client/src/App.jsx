@@ -7,6 +7,7 @@ import RoomModal from './components/RoomModal';
 import FileMismatchModal from './components/FileMismatchModal';
 import InfoModal from './components/InfoModal';
 import AppPreloader from './components/AppPreloader';
+import CinemaTransition from './components/CinemaTransition';
 import { syncEngine } from './services/syncEngine';
 
 function formatTime(seconds) {
@@ -61,6 +62,10 @@ export default function App() {
   const [users, setUsers] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [controlMode, setControlMode] = useState('co-op');
+
+  // Retro Cinema Transition State
+  const [transitionData, setTransitionData] = useState(null);
+  const [isTransitionComplete, setIsTransitionComplete] = useState(false);
 
   const [messages, setMessages] = useState([]);
   const [reactions, setReactions] = useState([]);
@@ -474,6 +479,13 @@ export default function App() {
       setControlMode(response.mode);
       if (response.messages) setMessages(response.messages);
 
+      // Trigger Retro Cinema Curtain Transition
+      setTransitionData({
+        roomId: response.roomId,
+        username: response.currentUser?.username || username,
+        isHost: !!response.currentUser?.isHost,
+      });
+
       // Update URL query without reload
       const newUrl = `${window.location.pathname}?room=${response.roomId}`;
       window.history.pushState({ path: newUrl }, '', newUrl);
@@ -558,96 +570,111 @@ export default function App() {
         <>
           {/* Top Navigation Bar */}
           <Header
-        roomId={roomId}
-        currentUser={currentUser}
-        usersCount={users.length}
-        isConnected={isConnected}
-        controlMode={controlMode}
-        isHost={isHost}
-        onToggleControlMode={handleToggleControlMode}
-        onShowToast={showToast}
-        onOpenInfo={() => setIsInfoModalOpen(true)}
-        onChangeVideo={() => changeVideoTriggerRef.current?.()}
-        voiceMode={voiceMode}
-        isOpenMicActive={isOpenMicActive}
-        isSpeaking={activeSpeakers.has('local')}
-        onToggleVoiceMode={handleToggleVoiceMode}
-        onSetVoiceMode={handleSetVoiceMode}
-        onToggleMic={handleToggleMic}
-        onPttStart={handlePttStart}
-        onPttEnd={handlePttEnd}
-      />
+            roomId={roomId}
+            currentUser={currentUser}
+            usersCount={users.length}
+            isConnected={isConnected}
+            controlMode={controlMode}
+            isHost={isHost}
+            onToggleControlMode={handleToggleControlMode}
+            onShowToast={showToast}
+            onOpenInfo={() => setIsInfoModalOpen(true)}
+            onChangeVideo={() => changeVideoTriggerRef.current?.()}
+            voiceMode={voiceMode}
+            isOpenMicActive={isOpenMicActive}
+            isSpeaking={activeSpeakers.has('local')}
+            onToggleVoiceMode={handleToggleVoiceMode}
+            onSetVoiceMode={handleSetVoiceMode}
+            onToggleMic={handleToggleMic}
+            onPttStart={handlePttStart}
+            onPttEnd={handlePttEnd}
+            className={transitionData ? 'cinema-header-enter' : ''}
+          />
 
-      {/* Main Cinema Workspace */}
-      <main className="main-workspace">
-        <section className="cinema-stage">
-          {/* File Mismatch Warning Banner */}
-          {!isMismatchDismissed && (
-            <FileMismatchModal
-              myFileInfo={myFileInfo}
-              partnerFileInfo={partnerFileInfo}
-              onDismiss={() => setIsMismatchDismissed(true)}
+          {/* Main Cinema Workspace */}
+          <main className={`main-workspace ${transitionData ? 'cinema-workspace-enter' : ''}`}>
+            <section className="cinema-stage">
+              {/* File Mismatch Warning Banner */}
+              {!isMismatchDismissed && (
+                <FileMismatchModal
+                  myFileInfo={myFileInfo}
+                  partnerFileInfo={partnerFileInfo}
+                  onDismiss={() => setIsMismatchDismissed(true)}
+                />
+              )}
+
+              {/* Video Player */}
+              <VideoPlayer
+                videoRefExternal={videoRef}
+                onPlaybackAction={handleLocalPlaybackAction}
+                onMetadataLoaded={handleLocalMetadataLoaded}
+                onTimeUpdate={setCurrentVideoTime}
+                remoteAction={remoteAction}
+                reactions={reactions}
+                onShowToast={showToast}
+                messages={messages}
+                currentUser={currentUser}
+                isHost={isHost}
+                controlMode={controlMode}
+                onToggleControlMode={handleToggleControlMode}
+                onRegisterChangeVideoTrigger={(fn) => { changeVideoTriggerRef.current = fn; }}
+                onSendMessage={handleSendMessage}
+                onSendReaction={handleSendReaction}
+                onSeekToTime={handleSeekToTime}
+                toasts={toasts}
+                onDismissToast={dismissToast}
+                onFullscreenChange={setIsFullscreen}
+                activeSpeakers={activeSpeakers}
+                users={users}
+              />
+
+              {/* Sync Status & Resync Controls Bar */}
+              <SyncStatusBar
+                isConnected={isConnected}
+                drift={drift}
+                partnerFileInfo={partnerFileInfo}
+                myFileInfo={myFileInfo}
+                partnerPresent={partnerPresent}
+                onManualResync={handleManualResync}
+                onChangeVideo={() => changeVideoTriggerRef.current?.()}
+              />
+            </section>
+
+            {/* Live Chat Sidebar */}
+            <ChatPanel
+              messages={messages}
+              currentUser={currentUser}
+              currentVideoTime={currentVideoTime}
+              onSendMessage={handleSendMessage}
+              onSendReaction={handleSendReaction}
+              onSeekToTime={handleSeekToTime}
+              isCollapsed={isChatCollapsed}
+              onToggleCollapse={() => setIsChatCollapsed(!isChatCollapsed)}
+            />
+          </main>
+
+          {/* Initial Entry Room Modal */}
+          {(!roomId || !isTransitionComplete) && (
+            <RoomModal
+              initialRoomId={initialRoomQuery}
+              onJoinRoom={handleJoinRoom}
+              onOpenInfo={() => setIsInfoModalOpen(true)}
+              isLeaving={!!transitionData}
             />
           )}
 
-          {/* Video Player */}
-          <VideoPlayer
-            videoRefExternal={videoRef}
-            onPlaybackAction={handleLocalPlaybackAction}
-            onMetadataLoaded={handleLocalMetadataLoaded}
-            onTimeUpdate={setCurrentVideoTime}
-            remoteAction={remoteAction}
-            reactions={reactions}
-            onShowToast={showToast}
-            messages={messages}
-            currentUser={currentUser}
-            isHost={isHost}
-            controlMode={controlMode}
-            onToggleControlMode={handleToggleControlMode}
-            onRegisterChangeVideoTrigger={(fn) => { changeVideoTriggerRef.current = fn; }}
-            onSendMessage={handleSendMessage}
-            onSendReaction={handleSendReaction}
-            onSeekToTime={handleSeekToTime}
-            toasts={toasts}
-            onDismissToast={dismissToast}
-            onFullscreenChange={setIsFullscreen}
-            activeSpeakers={activeSpeakers}
-            users={users}
-          />
-
-          {/* Sync Status & Resync Controls Bar */}
-          <SyncStatusBar
-            isConnected={isConnected}
-            drift={drift}
-            partnerFileInfo={partnerFileInfo}
-            myFileInfo={myFileInfo}
-            partnerPresent={partnerPresent}
-            onManualResync={handleManualResync}
-            onChangeVideo={() => changeVideoTriggerRef.current?.()}
-          />
-        </section>
-
-        {/* Live Chat Sidebar */}
-        <ChatPanel
-          messages={messages}
-          currentUser={currentUser}
-          currentVideoTime={currentVideoTime}
-          onSendMessage={handleSendMessage}
-          onSendReaction={handleSendReaction}
-          onSeekToTime={handleSeekToTime}
-          isCollapsed={isChatCollapsed}
-          onToggleCollapse={() => setIsChatCollapsed(!isChatCollapsed)}
-        />
-      </main>
-
-      {/* Initial Entry Room Modal */}
-      {!roomId && (
-        <RoomModal
-          initialRoomId={initialRoomQuery}
-          onJoinRoom={handleJoinRoom}
-          onOpenInfo={() => setIsInfoModalOpen(true)}
-        />
-      )}
+          {/* Retro Cinema Premiere Curtain & Projector Transition */}
+          {transitionData && (
+            <CinemaTransition
+              roomId={transitionData.roomId}
+              username={transitionData.username}
+              isHost={transitionData.isHost}
+              onComplete={() => {
+                setIsTransitionComplete(true);
+                setTransitionData(null);
+              }}
+            />
+          )}
 
       {/* How It Works Info Modal */}
       <InfoModal

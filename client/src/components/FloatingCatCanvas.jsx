@@ -4,8 +4,13 @@ import { getPreloadedCatImages, NUM_UNIQUE_CATS } from '../services/assetPreload
 const COPIES_PER_CAT = 2; // Each head duplicated twice = 24 cats in total
 const TOTAL_CATS = NUM_UNIQUE_CATS * COPIES_PER_CAT;
 
-export default function FloatingCatCanvas() {
+export default function FloatingCatCanvas({ paused = false }) {
   const canvasRef = useRef(null);
+  const pausedRef = useRef(paused);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -727,6 +732,10 @@ export default function FloatingCatCanvas() {
     }
 
     function loop() {
+      if (pausedRef.current) {
+        animationFrameId = requestAnimationFrame(loop);
+        return;
+      }
       updatePhysics();
       draw();
       animationFrameId = requestAnimationFrame(loop);

@@ -23,8 +23,10 @@ export default function RoomModal({
   initialRoomId = '',
   onJoinRoom,
   onOpenInfo,
+  isLeaving = false,
 }) {
   const [activeTab, setActiveTab] = useState(initialRoomId ? 'join' : 'create');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [username, setUsername] = useState(() => {
     try {
       return localStorage.getItem('cine_username') || '';
@@ -45,6 +47,7 @@ export default function RoomModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setError('');
 
     const cleanName = username.trim();
@@ -62,10 +65,12 @@ export default function RoomModal({
     }
 
     localStorage.setItem('cine_username', cleanName);
+    setIsSubmitting(true);
     try {
       await onJoinRoom(targetRoom, cleanName, activeTab === 'create' ? roomMode : null);
     } catch (err) {
       setError(err.message || 'Failed to join room');
+      setIsSubmitting(false);
     }
   };
 
@@ -75,8 +80,8 @@ export default function RoomModal({
   };
 
   return (
-    <div className="landing-page-wrapper">
-      <FloatingCatCanvas />
+    <div className={`landing-page-wrapper ${isLeaving ? 'landing-leaving' : ''}`}>
+      <FloatingCatCanvas paused={isLeaving} />
       <div className="landing-container">
         
         {/* Hero Section */}
@@ -251,8 +256,14 @@ export default function RoomModal({
               </div>
             )}
 
-            <button type="submit" className="submit-btn">
-              {activeTab === 'create' ? '🎬 CREATE WATCH ROOM' : '🎟️ JOIN WATCH ROOM'}
+            <button
+              type="submit"
+              className={`submit-btn ${isSubmitting ? 'submitting' : ''}`}
+              disabled={isSubmitting}
+            >
+              {isSubmitting
+                ? (activeTab === 'create' ? '🎬 ISSUING TICKET...' : '🎟️ CHECKING TICKET...')
+                : (activeTab === 'create' ? '🎬 CREATE WATCH ROOM' : '🎟️ JOIN WATCH ROOM')}
             </button>
           </form>
 
