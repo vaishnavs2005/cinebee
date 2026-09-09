@@ -30,7 +30,7 @@ export default function FullscreenChatOverlay({
   const toastTimeoutRef = useRef(null);
   const prevMessagesLengthRef = useRef(messages.length);
 
-  // Dismiss chat when clicking outside the chat box or pressing Escape
+  // Dismiss chat when clicking outside the chat box
   useEffect(() => {
     if (!isOpen) return;
 
@@ -44,20 +44,65 @@ export default function FullscreenChatOverlay({
       setIsOpen(false);
     };
 
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [isOpen]);
+
+  // Fullscreen Keyboard Shortcuts:
+  // - Pressing 'X' / 'x': Toggles chat open/closed. When opened, immediately places cursor in input field.
+  // - Pressing 'Escape': Closes chat.
+  useEffect(() => {
+    if (!isFullscreen) return;
+
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.isContentEditable
+      );
+
+      // Handle 'X' or 'x' key
+      if (e.code === 'KeyX' || e.key === 'x' || e.key === 'X') {
+        // Allow regular typing of the letter 'x' inside inputs
+        if (isTyping) {
+          return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (isOpen) {
+          setIsOpen(false);
+        } else {
+          if (toastTimeoutRef.current) {
+            clearTimeout(toastTimeoutRef.current);
+          }
+          setActiveToast(null);
+          setIsOpen(true);
+          setUnreadCount(0);
+
+          // Focus the text input directly so user can immediately type
+          setTimeout(() => {
+            inputRef.current?.focus();
+          }, 30);
+        }
+        return;
+      }
+
+      // Handle Escape key to dismiss chat
+      if (e.key === 'Escape' && isOpen) {
+        e.preventDefault();
+        e.stopPropagation();
         setIsOpen(false);
       }
     };
 
-    window.addEventListener('pointerdown', handlePointerDown, true);
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.removeEventListener('pointerdown', handlePointerDown, true);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isOpen]);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isFullscreen, isOpen]);
 
   // Auto-scroll chat messages to bottom
   const scrollToBottom = useCallback(() => {
@@ -284,10 +329,10 @@ export default function FullscreenChatOverlay({
               type="button"
               className="fs-chat-close-btn"
               onClick={toggleChat}
-              title="Close chat (Esc)"
+              title="Close chat (X / Esc)"
               aria-label="Close chat"
             >
-              <ChevronDown size={18} />
+              <X size={18} />
             </button>
           </div>
 
@@ -366,10 +411,15 @@ export default function FullscreenChatOverlay({
               ref={inputRef}
               type="text"
               className="fs-chat-input"
-              placeholder="Reply to partner..."
+              placeholder="Reply to partner... (Esc to close)"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape') {
+                  setIsOpen(false);
+                }
+              }}
               maxLength={500}
             />
             <button
@@ -390,10 +440,10 @@ export default function FullscreenChatOverlay({
         type="button"
         className={`fullscreen-chat-btn ${isOpen ? 'active' : ''}`}
         onClick={toggleChat}
-        title={isOpen ? "Minimize Party Chat" : "Open Party Chat"}
+        title={isOpen ? "Close Party Chat (X / Esc)" : "Open Party Chat (Press X)"}
         aria-label="Toggle Party Chat"
       >
-        <MessageSquare size={22} />
+        {isOpen ? <X size={22} /> : <MessageSquare size={22} />}
         {!isOpen && unreadCount > 0 && (
           <span className="fs-chat-unread-badge">
             {unreadCount > 9 ? '9+' : unreadCount}
