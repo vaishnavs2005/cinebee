@@ -93,12 +93,93 @@ export default function App() {
   const videoRef = useRef(null);
   const changeVideoTriggerRef = useRef(null);
 
-  const showToast = useCallback((msg) => {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isDocFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      const isWindowFs = (
+        window.matchMedia?.('(display-mode: fullscreen)')?.matches ||
+        (window.innerWidth >= window.screen.width - 2 && window.innerHeight >= window.screen.height - 2)
+      );
+      setIsFullscreen(isDocFs || isWindowFs);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    window.addEventListener('resize', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      window.removeEventListener('resize', handleFullscreenChange);
+    };
+  }, []);
+
+  const toastTimersRef = useRef(new Map());
+
+  const dismissToast = useCallback((id) => {
+    if (toastTimersRef.current.has(id)) {
+      clearTimeout(toastTimersRef.current.get(id));
+      toastTimersRef.current.delete(id);
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const showToast = useCallback((msg, options = {}) => {
+    const category = typeof options === 'string' ? options : options.category || (
+      typeof msg === 'string' && (msg.includes('seeked to') || msg.includes('jumped to')) ? 'seek' :
+      typeof msg === 'string' && (msg.includes('paused') || msg.includes('resumed playback')) ? 'playback' :
+      undefined
+    );
+    const duration = (typeof options === 'object' && options.duration) || (category === 'seek' ? 2200 : 2800);
     const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, text: msg }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+
+    setToasts((prev) => {
+      // 1. If this notification has a category (e.g., 'seek' or 'playback'), remove any existing notification of the same category immediately
+      let filtered = category
+        ? prev.filter((t) => {
+            if (t.category === category) {
+              if (toastTimersRef.current.has(t.id)) {
+                clearTimeout(toastTimersRef.current.get(t.id));
+                toastTimersRef.current.delete(t.id);
+              }
+              return false;
+            }
+            return true;
+          })
+        : prev;
+
+      // 2. Limit total notifications on screen: at most 3 visible.
+      // When a new notification arrives, older ones are dismissed so it stays within limit.
+      const MAX_TOASTS = 3;
+      if (filtered.length >= MAX_TOASTS) {
+        const dropCount = filtered.length - (MAX_TOASTS - 1);
+        const toDrop = filtered.slice(0, dropCount);
+        toDrop.forEach((t) => {
+          if (toastTimersRef.current.has(t.id)) {
+            clearTimeout(toastTimersRef.current.get(t.id));
+            toastTimersRef.current.delete(t.id);
+          }
+        });
+        filtered = filtered.slice(dropCount);
+      }
+
+      return [...filtered, { id, text: msg, category }];
+    });
+
+    const timer = setTimeout(() => {
+      dismissToast(id);
+    }, duration);
+
+    toastTimersRef.current.set(id, timer);
+  }, [dismissToast]);
+
+  useEffect(() => {
+    return () => {
+      toastTimersRef.current.forEach((timer) => clearTimeout(timer));
+      toastTimersRef.current.clear();
+    };
   }, []);
 
   // Check URL parameter on first mount (?room=xyz)
@@ -116,6 +197,10 @@ export default function App() {
       },
       onPresenceUpdate: (updatedUsers, count) => {
         setUsers(updatedUsers || []);
+        const myUser = updatedUsers?.find((u) => u.id === syncEngine.socket?.id);
+        if (myUser) {
+          setCurrentUser((prev) => (prev ? { ...prev, ...myUser } : myUser));
+        }
         // Find partner's file info if available
         const partner = updatedUsers?.find((u) => u.id !== syncEngine.socket?.id);
         if (partner && partner.fileInfo) {
@@ -160,9 +245,17 @@ export default function App() {
       },
       onVideoAction: (action) => {
         setRemoteAction(action);
-        const actionLabel = action.type === 'play' ? 'resumed playback' : action.type === 'pause' ? 'paused' : 'seeked to';
+        const name = action.senderName || 'Partner';
         const formatted = formatTime(action.time);
-        showToast(`${action.senderName || 'Partner'} ${actionLabel} at ${formatted}`);
+        if (action.type === 'play') {
+          showToast(`${name} resumed playback`, { category: 'playback' });
+        } else if (action.type === 'pause') {
+          showToast(`${name} paused at ${formatted}`, { category: 'playback' });
+        } else if (action.type === 'seek') {
+          showToast(`${name} seeked to ${formatted}`, { category: 'seek', duration: 2200 });
+        } else {
+          showToast(`${name} updated playback at ${formatted}`);
+        }
       },
       onHeartbeat: (data) => {
         if (!videoRef.current) return;
@@ -234,24 +327,7 @@ export default function App() {
         e.preventDefault();
         
         if (voiceModeRef.current === 'ptt') {
-          if (!isMicActiveRef.current) {
-            isMicActiveRef.current = true;
-            try {
-              if (!syncEngine.localAudioStream) {
-                await syncEngine.acquireLocalMedia();
-              }
-              const ok = syncEngine.setMicEnabled(true);
-              if (ok) {
-                setActiveSpeakers(prev => new Set([...prev, 'local']));
-              } else {
-                showToast('Microphone access required to speak.');
-                isMicActiveRef.current = false;
-              }
-            } catch (err) {
-              showToast('Microphone access required for voice chat.');
-              isMicActiveRef.current = false;
-            }
-          }
+          handlePttStart();
         } else if (voiceModeRef.current === 'open') {
           // Toggle Open Mic state
           const nextState = !isOpenMicActiveRef.current;
@@ -288,15 +364,7 @@ export default function App() {
       if (e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z') {
         e.preventDefault();
         if (voiceModeRef.current === 'ptt') {
-          if (isMicActiveRef.current) {
-            isMicActiveRef.current = false;
-            syncEngine.setMicEnabled(false);
-            setActiveSpeakers(prev => {
-              const next = new Set(prev);
-              next.delete('local');
-              return next;
-            });
-          }
+          handlePttEnd();
         }
       }
     };
@@ -310,9 +378,55 @@ export default function App() {
   }, [roomId, users, showToast]);
 
   // Voice Chat UI Handlers
+  const handlePttStart = useCallback(async () => {
+    if (!roomId) return;
+    if (voiceModeRef.current !== 'ptt') return;
+    if (!isMicActiveRef.current) {
+      isMicActiveRef.current = true;
+      try {
+        if (!syncEngine.localAudioStream) {
+          await syncEngine.acquireLocalMedia();
+        }
+        const ok = syncEngine.setMicEnabled(true);
+        if (ok) {
+          setActiveSpeakers(prev => new Set([...prev, 'local']));
+        } else {
+          showToast('Microphone access required to speak.');
+          isMicActiveRef.current = false;
+        }
+      } catch (err) {
+        showToast('Microphone access required for voice chat.');
+        isMicActiveRef.current = false;
+      }
+    }
+  }, [roomId, showToast]);
+
+  const handlePttEnd = useCallback(() => {
+    if (voiceModeRef.current !== 'ptt') return;
+    if (isMicActiveRef.current) {
+      isMicActiveRef.current = false;
+      syncEngine.setMicEnabled(false);
+      setActiveSpeakers(prev => {
+        const next = new Set(prev);
+        next.delete('local');
+        return next;
+      });
+    }
+  }, []);
+
   const handleToggleVoiceMode = () => {
     setVoiceMode(prev => prev === 'ptt' ? 'open' : 'ptt');
-    // Reset mic state when switching modes
+    if (isMicActiveRef.current || isOpenMicActive) {
+      syncEngine.setMicEnabled(false);
+      isMicActiveRef.current = false;
+      setIsOpenMicActive(false);
+      setActiveSpeakers(prev => { const next = new Set(prev); next.delete('local'); return next; });
+    }
+  };
+
+  const handleSetVoiceMode = (mode) => {
+    if (mode === voiceMode) return;
+    setVoiceMode(mode);
     if (isMicActiveRef.current || isOpenMicActive) {
       syncEngine.setMicEnabled(false);
       isMicActiveRef.current = false;
@@ -378,6 +492,7 @@ export default function App() {
     } catch (err) {
       console.error('Join room failed:', err);
       showToast(`Error joining room: ${err.message}`);
+      throw err;
     }
   };
 
@@ -439,9 +554,13 @@ export default function App() {
         onOpenInfo={() => setIsInfoModalOpen(true)}
         onChangeVideo={() => changeVideoTriggerRef.current?.()}
         voiceMode={voiceMode}
-        isOpenMicActive={isOpenMicActive || isMicActiveRef.current}
+        isOpenMicActive={isOpenMicActive}
+        isSpeaking={activeSpeakers.has('local')}
         onToggleVoiceMode={handleToggleVoiceMode}
+        onSetVoiceMode={handleSetVoiceMode}
         onToggleMic={handleToggleMic}
+        onPttStart={handlePttStart}
+        onPttEnd={handlePttEnd}
       />
 
       {/* Main Cinema Workspace */}
@@ -474,6 +593,9 @@ export default function App() {
             onSendMessage={handleSendMessage}
             onSendReaction={handleSendReaction}
             onSeekToTime={handleSeekToTime}
+            toasts={toasts}
+            onDismissToast={dismissToast}
+            onFullscreenChange={setIsFullscreen}
           />
 
           {/* Sync Status & Resync Controls Bar */}
@@ -551,14 +673,21 @@ export default function App() {
         <RemoteAudio key={userId} userId={userId} stream={stream} />
       ))}
 
-      {/* Toast Notifications */}
-      <div className="toast-container" aria-live="polite">
-        {toasts.map((toast) => (
-          <div key={toast.id} className="toast">
-            <span>{toast.text}</span>
-          </div>
-        ))}
-      </div>
+      {/* Toast Notifications (Standard non-fullscreen view; fullscreen toasts render inside VideoPlayer) */}
+      {!isFullscreen && (
+        <div className="toast-container" aria-live="polite">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className="toast"
+              onClick={() => dismissToast(toast.id)}
+              title="Click to dismiss"
+            >
+              <span>{toast.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MessageSquare, Send, Clock, X, Sparkles, ChevronDown } from 'lucide-react';
-
-const QUICK_EMOJIS = ['❤️', '😂', '🍿', '😱', '🔥', '👏', '😭', '✨'];
+import { REACTIONS } from '../utils/reactions';
 
 function formatTimecode(seconds) {
   if (!isFinite(seconds) || seconds === null || seconds < 0) return null;
@@ -24,10 +23,41 @@ export default function FullscreenChatOverlay({
   const [activeToast, setActiveToast] = useState(null);
   const [inputText, setInputText] = useState('');
 
+  const chatBoxRef = useRef(null);
+  const chatBtnRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const prevMessagesLengthRef = useRef(messages.length);
+
+  // Dismiss chat when clicking outside the chat box or pressing Escape
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (e) => {
+      if (
+        (chatBoxRef.current && chatBoxRef.current.contains(e.target)) ||
+        (chatBtnRef.current && chatBtnRef.current.contains(e.target))
+      ) {
+        return;
+      }
+      setIsOpen(false);
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
 
   // Auto-scroll chat messages to bottom
   const scrollToBottom = useCallback(() => {
@@ -179,11 +209,20 @@ export default function FullscreenChatOverlay({
   if (!isFullscreen) return null;
 
   return (
-    <div
-      className="fullscreen-chat-layer"
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => e.stopPropagation()}
-    >
+    <div className="fullscreen-chat-layer">
+      {/* Click-outside backdrop: clicking anywhere outside the chat window dismisses it immediately */}
+      {isOpen && (
+        <div
+          className="fs-chat-backdrop"
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setIsOpen(false);
+          }}
+          aria-hidden="true"
+        />
+      )}
+
       {/* 5-Second Translucent Message Toast Preview */}
       {activeToast && !isOpen && (
         <div
@@ -219,7 +258,7 @@ export default function FullscreenChatOverlay({
           </div>
 
           <div className="fs-toast-footer">
-            <span className="fs-toast-hint">Click anywhere to reply</span>
+            <span className="fs-toast-hint">Click to reply 💬</span>
           </div>
 
           {/* 5-Second Progress Countdown Bar */}
@@ -227,13 +266,17 @@ export default function FullscreenChatOverlay({
         </div>
       )}
 
-      {/* Fullscreen Chat Window */}
-      {isOpen ? (
-        <div className="fullscreen-chat-box">
+      {/* Fullscreen Chat Window - Floating directly above the chat logo button */}
+      {isOpen && (
+        <div
+          ref={chatBoxRef}
+          className="fullscreen-chat-box"
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* Header */}
           <div className="fs-chat-header">
             <div className="fs-chat-title">
-              <MessageSquare size={16} color="var(--accent-primary)" />
+              <MessageSquare size={15} color="var(--accent-red)" />
               <span>Party Chat</span>
               <span className="fs-chat-count">({messages.length})</span>
             </div>
@@ -241,7 +284,8 @@ export default function FullscreenChatOverlay({
               type="button"
               className="fs-chat-close-btn"
               onClick={toggleChat}
-              title="Close chat overlay (Esc)"
+              title="Close chat (Esc)"
+              aria-label="Close chat"
             >
               <ChevronDown size={18} />
             </button>
@@ -251,8 +295,8 @@ export default function FullscreenChatOverlay({
           <div className="fs-chat-messages">
             {messages.length === 0 ? (
               <div className="empty-chat-state fs-empty-state">
-                <Sparkles size={28} color="var(--text-muted)" style={{ opacity: 0.6 }} />
-                <p>No messages yet. Send something to your partner!</p>
+                <Sparkles size={20} color="var(--text-muted)" style={{ opacity: 0.6 }} />
+                <p>No messages yet. Say hi!</p>
               </div>
             ) : (
               messages.map((msg) => {
@@ -263,6 +307,9 @@ export default function FullscreenChatOverlay({
                     className={`message-row ${isMine ? 'mine' : 'theirs'}`}
                   >
                     <div className="message-meta">
+                      {msg.senderAvatar && (
+                        <img src={msg.senderAvatar} alt="" className="message-sender-avatar" />
+                      )}
                       <span className="message-sender">{msg.sender}</span>
                       <span>
                         {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -291,15 +338,16 @@ export default function FullscreenChatOverlay({
 
           {/* Quick Reaction Bar */}
           <div className="fs-chat-reactions">
-            {QUICK_EMOJIS.map((emoji) => (
+            {REACTIONS.map(({ emoji, image, label }) => (
               <button
                 key={emoji}
                 type="button"
                 className="reaction-btn"
                 onClick={() => onSendReaction && onSendReaction(emoji)}
-                title={`React with ${emoji}`}
+                title={`React with ${label}`}
+                aria-label={label}
               >
-                {emoji}
+                <img src={image} alt={label} className="reaction-btn-img" />
               </button>
             ))}
           </div>
@@ -312,7 +360,7 @@ export default function FullscreenChatOverlay({
               className="ctrl-btn fs-timecode-btn"
               title={`Insert current timecode (@${formatTimecode(currentVideoTime)})`}
             >
-              <Clock size={14} />
+              <Clock size={13} />
             </button>
             <input
               ref={inputRef}
@@ -321,6 +369,7 @@ export default function FullscreenChatOverlay({
               placeholder="Reply to partner..."
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
               maxLength={500}
             />
             <button
@@ -329,27 +378,28 @@ export default function FullscreenChatOverlay({
               disabled={!inputText.trim()}
               title="Send reply"
             >
-              <Send size={15} />
+              <Send size={14} />
             </button>
           </form>
         </div>
-      ) : (
-        /* Small Round Icon Floating in the Corner */
-        <button
-          type="button"
-          className="fullscreen-chat-btn"
-          onClick={toggleChat}
-          title="Open Fullscreen Chat"
-          aria-label="Open Party Chat"
-        >
-          <MessageSquare size={22} />
-          {unreadCount > 0 && (
-            <span className="fs-chat-unread-badge">
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </span>
-          )}
-        </button>
       )}
+
+      {/* Floating Chat Logo Button - ALWAYS STAYS VISIBLE IN CORNER */}
+      <button
+        ref={chatBtnRef}
+        type="button"
+        className={`fullscreen-chat-btn ${isOpen ? 'active' : ''}`}
+        onClick={toggleChat}
+        title={isOpen ? "Minimize Party Chat" : "Open Party Chat"}
+        aria-label="Toggle Party Chat"
+      >
+        <MessageSquare size={22} />
+        {!isOpen && unreadCount > 0 && (
+          <span className="fs-chat-unread-badge">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        )}
+      </button>
     </div>
   );
 }

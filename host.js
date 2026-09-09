@@ -1,6 +1,6 @@
 /**
- * CineBee Local Host Script
- * Fast, one-command local hosting for CineBee.
+ * Meowvie Local Host Script
+ * Fast, one-command local hosting for Meowvie.
  * 
  * Usage:
  *   node host.js           (hosts production build fast & opens browser)
@@ -112,7 +112,7 @@ function printBanner(port) {
   const localUrl = `http://localhost:${port}`;
 
   console.log('\n=============================================================');
-  console.log('   🐝  CineBee Local Host is LIVE');
+  console.log('   🐝  Meowvie Local Host is LIVE');
   console.log('=============================================================');
   console.log(`   ➜ Local:    \x1b[36m${localUrl}\x1b[0m`);
   if (networkIps.length > 0) {
@@ -142,7 +142,7 @@ async function main() {
 
     checkBuild();
 
-    console.log(`🚀 Starting CineBee server on port ${PORT}...`);
+    console.log(`🚀 Starting Meowvie server on port ${PORT}...`);
 
     const serverEnv = { ...process.env, PORT: String(PORT) };
     const serverProcess = spawn('node', ['server/index.js'], {
@@ -162,13 +162,13 @@ async function main() {
     printBanner(PORT);
 
     if (!noOpen) {
-      console.log('🌐 Opening CineBee in your default browser...');
+      console.log('🌐 Opening Meowvie in your default browser...');
       openBrowser(`http://localhost:${PORT}`);
     }
 
     // Handle shutdown
     const cleanup = () => {
-      console.log('\n🛑 Shutting down CineBee server...');
+      console.log('\n🛑 Shutting down Meowvie server...');
       if (serverProcess.pid) {
         if (process.platform === 'win32') {
           try {
@@ -194,7 +194,7 @@ async function main() {
     });
 
   } catch (err) {
-    console.error('Error starting CineBee:', err);
+    console.error('Error starting Meowvie:', err);
     process.exit(1);
   }
 }

@@ -1,9 +1,9 @@
-# CineBee PowerShell Local Host Launcher
+# Meowvie PowerShell Local Host Launcher
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
 Write-Host "=============================================================" -ForegroundColor Yellow
-Write-Host "   🐝 CineBee Local Host Launcher (PowerShell)" -ForegroundColor Cyan
+Write-Host "   🐝 Meowvie Local Host Launcher (PowerShell)" -ForegroundColor Cyan
 Write-Host "=============================================================" -ForegroundColor Yellow
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {

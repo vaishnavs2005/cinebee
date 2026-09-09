@@ -1,8 +1,8 @@
 {
-  "name": "cinebee",
+  "name": "meowvie",
   "version": "1.0.0",
   "private": true,
-  "description": "CineBee — Synchronized Local-Video Watch Party for Long-Distance Couples",
+  "description": "Meowvie — Synchronized Local-Video Watch Party for Long-Distance Couples",
   "scripts": {
     "dev:server": "node server/index.js",
     "dev:client": "npm --prefix client run dev",

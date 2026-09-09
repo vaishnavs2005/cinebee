@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, Send, Clock, ChevronRight, Sparkles } from 'lucide-react';
-
-const QUICK_EMOJIS = ['❤️', '😂', '🍿', '😱', '🔥', '👏', '😭', '✨'];
+import { REACTIONS } from '../utils/reactions';
 
 function formatTimecode(seconds) {
   if (!isFinite(seconds) || seconds === null || seconds < 0) return null;
@@ -90,24 +89,6 @@ export default function ChatPanel({
       <button
         onClick={onToggleCollapse}
         className="chat-collapsed-floating-btn"
-        style={{
-          position: 'absolute',
-          right: '24px',
-          bottom: '110px',
-          zIndex: 30,
-          background: 'var(--accent-primary)',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 'var(--radius-full)',
-          padding: '12px 18px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          cursor: 'pointer',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(255, 42, 109, 0.4)',
-          fontWeight: 600,
-          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-        }}
       >
         <MessageSquare size={18} /> Chat ({messages.length})
       </button>
@@ -118,26 +99,18 @@ export default function ChatPanel({
     <aside className="chat-sidebar">
       <div className="chat-header">
         <div className="chat-header-title">
-          <MessageSquare size={16} color="var(--accent-primary)" />
+          <MessageSquare size={18} color="var(--accent-red)" />
           <span>Party Chat</span>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>({messages.length})</span>
+          <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--accent-red)', background: 'var(--bg-cream)', padding: '2px 8px', borderRadius: 'var(--radius-full)', border: '1.5px solid var(--border-olive)' }}>{messages.length}</span>
         </div>
-        <button
-          onClick={onToggleCollapse}
-          className="ctrl-btn"
-          title="Collapse Chat"
-          aria-label="Collapse Chat"
-        >
-          <ChevronRight size={18} />
-        </button>
       </div>
 
       <div className="chat-messages-container">
         {messages.length === 0 ? (
           <div className="empty-chat-state">
-            <Sparkles size={32} color="var(--text-muted)" style={{ opacity: 0.5 }} />
-            <div style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Welcome to your watch room!</div>
-            <p>Type a message or tap an emoji reaction below to share the moment with your partner.</p>
+            <img src="/emojis/chat.png" alt="chat" className="empty-chat-icon" />
+            <div className="empty-chat-title">Grab the popcorn! 🎬</div>
+            <p className="empty-chat-sub">React or say something — your crew is watching.</p>
           </div>
         ) : (
           messages.map((msg) => {
@@ -148,6 +121,9 @@ export default function ChatPanel({
                 className={`message-row ${isMine ? 'mine' : 'theirs'}`}
               >
                 <div className="message-meta">
+                  {msg.senderAvatar && (
+                    <img src={msg.senderAvatar} alt="" className="message-sender-avatar" />
+                  )}
                   <span className="message-sender">{msg.sender}</span>
                   <span>
                     {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -176,14 +152,15 @@ export default function ChatPanel({
 
       {/* Quick Reaction Bar */}
       <div className="chat-reaction-bar">
-        {QUICK_EMOJIS.map((emoji) => (
+        {REACTIONS.map(({ emoji, image, label }) => (
           <button
             key={emoji}
             className="reaction-btn"
             onClick={() => onSendReaction(emoji)}
-            title={`React with ${emoji}`}
+            title={`React with ${label}`}
+            aria-label={label}
           >
-            {emoji}
+            <img src={image} alt={label} className="reaction-btn-img" />
           </button>
         ))}
       </div>

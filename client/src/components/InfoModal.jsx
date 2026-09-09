@@ -14,22 +14,29 @@ export default function InfoModal({ isOpen, onClose }) {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div className="info-badge-icon">
-              <img src={logoImg} alt="CineBee Logo" style={{ width: '28px', height: '28px', objectFit: 'contain' }} />
+            <div className="brand-logo" style={{ width: '48px', height: '48px' }}>
+              <img src={logoImg} alt="Meowvie Logo" className="brand-logo-img" />
             </div>
             <div>
-              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>
-                How CineBee Works
+              <h2 className="sticker-title-red" style={{ fontSize: '1.6rem' }}>
+                How Meowvie Works
               </h2>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Everything you and your partner need to know before starting
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                Everything you and your movie partner need to know
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="ctrl-btn"
-            style={{ width: '32px', height: '32px' }}
+            style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              background: 'var(--bg-cream-tint)',
+              border: '2px solid var(--border-olive)',
+              boxShadow: '1px 1px 0px #1A1A1A'
+            }}
             aria-label="Close modal"
           >
             <X size={18} />
@@ -37,29 +44,29 @@ export default function InfoModal({ isOpen, onClose }) {
         </div>
 
         <div className="info-sections">
-          {/* Section 1: Crucial Requirement */}
+          {/* Crucial Requirement */}
           <div className="info-box requirement">
             <div className="info-box-header">
-              <CheckCircle2 size={18} color="#ff2a6d" />
-              <strong>Requirement: Identical Movie Files</strong>
+              <CheckCircle2 size={18} color="var(--accent-red)" />
+              <strong style={{ color: 'var(--text-dark)' }}>Requirement: Identical Movie Files</strong>
             </div>
-            <p>
-              Both you and your partner must have the <strong>exact same video file</strong> (same duration, release, and cut) saved locally on your own devices (computer, laptop).
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-dark)', lineHeight: 1.45 }}>
+              Both you and your partner must have the <strong>exact same video file</strong> (same duration, release, and cut) saved locally on your own devices.
             </p>
           </div>
 
-          {/* Section 2: Why it's Zero Lag */}
+          {/* Section 1: Why it's Zero Lag */}
           <div className="info-step">
             <div className="step-num">1</div>
             <div className="step-content">
               <h4>Zero Upload & Zero Lag</h4>
               <p>
-                When you drag or select your video, it is read directly from your computer's disk using the HTML5 File API. <strong>The video file is never uploaded to the server.</strong> This means 100% original full HD/4K quality, instant scrubbing, zero buffering, and zero bandwidth costs.
+                When you choose your video file, it is read directly from your device storage via the HTML5 File API. <strong>Your video is never uploaded to any server.</strong> Enjoy 100% original full HD/4K quality, instant scrubbing, and zero buffering.
               </p>
             </div>
           </div>
 
-          {/* Section 3: Bi-directional sync */}
+          {/* Section 2: Bi-directional sync */}
           <div className="info-step">
             <div className="step-num">2</div>
             <div className="step-content">
@@ -71,7 +78,7 @@ export default function InfoModal({ isOpen, onClose }) {
             </div>
           </div>
 
-          {/* Section 4: Auto-Drift & Resync */}
+          {/* Section 3: Auto-Drift & Resync */}
           <div className="info-step">
             <div className="step-num">3</div>
             <div className="step-content">
@@ -82,36 +89,24 @@ export default function InfoModal({ isOpen, onClose }) {
             </div>
           </div>
 
-          {/* Section 5: Chat, Subtitles & Reactions */}
+          {/* Section 4: Voice Chat, Subtitles & Reactions */}
           <div className="info-step">
             <div className="step-num">4</div>
             <div className="step-content">
-              <h4>Subtitles, Timecodes & Reactions</h4>
+              <h4>Walkie-Talkie Voice Chat & Subtitles</h4>
               <p>
-                Drop your <code>.srt</code> or <code>.vtt</code> subtitle file right into the player. Click any <code>@MM:SS</code> timecode in chat to jump to favorite scenes, and tap emoji reactions to send floating celebrations!
+                Hold <strong>'Z'</strong> on your keyboard to speak through the built-in push-to-talk walkie-talkie! Drop your <code>.srt</code> subtitle file into the player, and click any <code>@MM:SS</code> timecode in chat to jump right to the scene.
               </p>
             </div>
-          </div>
-
-          {/* Quick Summary Checklist */}
-          <div className="info-checklist">
-            <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#fff', marginBottom: '8px' }}>
-              Quick 3-Step Routine:
-            </div>
-            <ol style={{ paddingLeft: '20px', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-              <li>Create a room and send the invite link or code to your partner.</li>
-              <li>Both of you choose your identical local video file (or use the test reel).</li>
-              <li>Hit play and enjoy movie night together in perfect harmony!</li>
-            </ol>
           </div>
         </div>
 
         <button
           onClick={onClose}
           className="submit-btn"
-          style={{ width: '100%', marginTop: '20px', background: 'var(--accent-gradient)' }}
+          style={{ width: '100%', marginTop: '20px' }}
         >
-          Got it, let's watch! 🍿
+          🎬 GOT IT, LET'S WATCH!
         </button>
       </div>
     </div>

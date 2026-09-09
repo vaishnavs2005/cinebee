@@ -11,7 +11,7 @@ import fixWebmDuration from 'fix-webm-duration';
  * - Audio-synced visual pulse bars
  * - EBML duration metadata patching so HTML5 video duration is seekable and scrubbable!
  */
-export async function generateSampleMovieBlob(durationSeconds = 10, title = 'CineBee Cinema Reel') {
+export async function generateSampleMovieBlob(durationSeconds = 10, title = 'Meowvie Cinema Reel') {
   return new Promise(async (resolve, reject) => {
     try {
       const canvas = document.createElement('canvas');

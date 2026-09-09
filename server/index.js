@@ -55,6 +55,8 @@ function getSanitizedUsers(room) {
     list.push({
       id,
       username: user.username,
+      avatar: user.avatar,
+      avatarNumber: user.avatarNumber,
       isHost: user.isHost,
       fileInfo: user.fileInfo,
       joinedAt: user.joinedAt,
@@ -75,8 +77,20 @@ io.on('connection', (socket) => {
     const cleanRoomId = roomId.trim().toLowerCase();
     const cleanUsername = (username || `User_${socket.id.substring(0, 4)}`).trim();
 
+    const room = getOrCreateRoom(cleanRoomId);
+
+    // Enforce max 5 participants per room
+    if (!room.users.has(socket.id) && room.users.size >= 5) {
+      if (callback) {
+        callback({ error: 'Room is full (maximum 5 participants allowed)' });
+      } else {
+        socket.emit('room_error', { message: 'Room is full (maximum 5 participants allowed)' });
+      }
+      return;
+    }
+
     // Leave any previous room
-    if (currentRoomId) {
+    if (currentRoomId && currentRoomId !== cleanRoomId) {
       socket.leave(currentRoomId);
       const prevRoom = rooms.get(currentRoomId);
       if (prevRoom) {
@@ -91,16 +105,31 @@ io.on('connection', (socket) => {
     currentRoomId = cleanRoomId;
     socket.join(cleanRoomId);
 
-    const room = getOrCreateRoom(cleanRoomId);
     const isFirstUser = room.users.size === 0;
 
     if (isFirstUser && (mode === 'host-only' || mode === 'co-op')) {
       room.mode = mode;
     }
 
+    // Randomly assign one of the 5 avatars, preferring unused in room
+    const usedAvatars = new Set();
+    for (const u of room.users.values()) {
+      if (u.id !== socket.id && u.avatarNumber) {
+        usedAvatars.add(u.avatarNumber);
+      }
+    }
+    const availableNumbers = [1, 2, 3, 4, 5].filter(n => !usedAvatars.has(n));
+    const chosenNumber = availableNumbers.length > 0
+      ? availableNumbers[Math.floor(Math.random() * availableNumbers.length)]
+      : (Math.floor(Math.random() * 5) + 1);
+
+    const avatarUrl = `/emojis/avatars/${chosenNumber}.png`;
+
     const userObj = {
       id: socket.id,
       username: cleanUsername,
+      avatar: avatarUrl,
+      avatarNumber: chosenNumber,
       isHost: isFirstUser,
       fileInfo: null,
       joinedAt: Date.now(),
@@ -280,6 +309,7 @@ io.on('connection', (socket) => {
       id: `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       sender: user ? user.username : 'Anonymous',
       senderId: socket.id,
+      senderAvatar: user ? user.avatar : null,
       isHost: user ? user.isHost : false,
       text: text.trim().substring(0, 1000),
       timecode: Number(timecode) >= 0 ? Number(timecode) : null,
@@ -423,11 +453,11 @@ app.get('*', (req, res) => {
   const indexPath = path.join(distPath, 'index.html');
   res.sendFile(indexPath, (err) => {
     if (err) {
-      res.status(200).send('CineBee Server Running. Build client to see UI.');
+      res.status(200).send('Meowvie Server Running. Build client to see UI.');
     }
   });
 });
 
 server.listen(PORT, () => {
-  console.log(`🐝 CineBee server listening on port ${PORT}`);
+  console.log(`🍿 Meowvie server listening on port ${PORT}`);
 });

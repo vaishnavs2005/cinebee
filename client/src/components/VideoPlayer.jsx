@@ -58,6 +58,9 @@ export default function VideoPlayer({
   onSendMessage,
   onSendReaction,
   onSeekToTime,
+  toasts = [],
+  onDismissToast,
+  onFullscreenChange,
 }) {
   const localVideoRef = useRef(null);
   const videoRef = videoRefExternal || localVideoRef;
@@ -243,7 +246,7 @@ export default function VideoPlayer({
       setVideoError(null);
       if (onShowToast) onShowToast('Generating animated cinema test reel (1-2s)...');
 
-      const sample = await generateSampleMovieBlob(10, 'CineBee Cinema Reel');
+      const sample = await generateSampleMovieBlob(10, 'Meowvie Cinema Reel');
       sampleDurationRef.current = sample.duration;
       currentFileNameRef.current = sample.name;
 
@@ -607,40 +610,69 @@ export default function VideoPlayer({
     setIsMuted(newMuted);
   };
 
-  // Fullscreen
+  // Fullscreen: Expands the video container to fill the entire physical screen (F11 effect)
   const toggleFullscreen = () => {
     const container = containerRef.current;
     if (!container) return;
 
-    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    const isDocFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    const isWindowFs = (
+      window.matchMedia?.('(display-mode: fullscreen)')?.matches ||
+      (window.innerWidth >= window.screen.width - 2 && window.innerHeight >= window.screen.height - 2)
+    );
+    const isCurrentlyFs = isDocFs || isWindowFs || isFullscreen;
+
+    if (!isCurrentlyFs) {
+      const opts = { navigationUI: 'hide' };
+      // Request native fullscreen with navigationUI: 'hide' to hide browser tabs and address bar
       if (container.requestFullscreen) {
-        container.requestFullscreen().catch(console.error);
+        container.requestFullscreen(opts).catch((err) => {
+          console.warn('container.requestFullscreen failed, trying documentElement:', err);
+          document.documentElement.requestFullscreen?.(opts).catch(console.error);
+        });
       } else if (container.webkitRequestFullscreen) {
         container.webkitRequestFullscreen();
+      } else if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen(opts).catch(console.error);
       }
+      setIsFullscreen(true);
+      if (onFullscreenChange) onFullscreenChange(true);
     } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().catch(console.error);
-      } else if (document.webkitExitFullscreen) {
-        document.webkitExitFullscreen();
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(console.error);
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
       }
+      setIsFullscreen(false);
+      if (onFullscreenChange) onFullscreenChange(false);
     }
   };
 
-  // Sync fullscreen state with document events
+  // Sync fullscreen state with document events and hardware F11 window expansion
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      const isNowFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-      setIsFullscreen(isNowFullscreen);
+    const checkFullscreen = () => {
+      const isDocFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      const isWindowFs = (
+        window.matchMedia?.('(display-mode: fullscreen)')?.matches ||
+        (window.innerWidth >= window.screen.width - 2 && window.innerHeight >= window.screen.height - 2)
+      );
+      const fs = isDocFs || isWindowFs;
+      setIsFullscreen(fs);
+      if (onFullscreenChange) onFullscreenChange(fs);
     };
 
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('fullscreenchange', checkFullscreen);
+    document.addEventListener('webkitfullscreenchange', checkFullscreen);
+    window.addEventListener('resize', checkFullscreen);
+
     return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('fullscreenchange', checkFullscreen);
+      document.removeEventListener('webkitfullscreenchange', checkFullscreen);
+      window.removeEventListener('resize', checkFullscreen);
     };
-  }, []);
+  }, [onFullscreenChange]);
 
   // Remote Action Handling (Applying peer's play/pause/seek)
   useEffect(() => {
@@ -727,6 +759,16 @@ export default function VideoPlayer({
         e.preventDefault();
         toggleFullscreen();
         resetControlsTimer();
+      } else if (e.code === 'F11' || e.key === 'F11') {
+        // Let the browser toggle F11 window mode, and sync our internal fullscreen layout state
+        setTimeout(() => {
+          const isDocFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+          const isWindowFs = (
+            window.matchMedia?.('(display-mode: fullscreen)')?.matches ||
+            (window.innerWidth >= window.screen.width - 2 && window.innerHeight >= window.screen.height - 2)
+          );
+          setIsFullscreen(isDocFs || isWindowFs);
+        }, 150);
       }
     };
 
@@ -749,7 +791,7 @@ export default function VideoPlayer({
       <div className={`ambient-glow ${!ambientGlow || !isPlaying ? 'dim' : ''}`} />
 
       <div
-        className={`video-container ${!controlsVisible && isPlaying ? 'controls-hidden' : ''}`}
+        className={`video-container ${isFullscreen ? 'is-fullscreen' : ''} ${!controlsVisible && isPlaying ? 'controls-hidden' : ''}`}
         ref={containerRef}
         onMouseMove={handleUserActivity}
         onTouchStart={handleUserActivity}
@@ -768,6 +810,22 @@ export default function VideoPlayer({
           onSendReaction={onSendReaction}
           onSeekToTime={onSeekToTime}
         />
+
+        {/* Fullscreen Toast Notifications (Playback sync, seeks, partner actions) */}
+        {isFullscreen && toasts && toasts.length > 0 && (
+          <div className="toast-container fullscreen-toast-container" aria-live="polite">
+            {toasts.map((toast) => (
+              <div
+                key={toast.id}
+                className="toast"
+                onClick={() => onDismissToast && onDismissToast(toast.id)}
+                title="Click to dismiss"
+              >
+                <span>{toast.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Top Header Bar inside Video Player */}
         {videoSrc && !videoError && (
@@ -840,11 +898,12 @@ export default function VideoPlayer({
               ref={videoRef}
               src={videoSrc}
               playsInline
+              className="video-element"
               onTimeUpdate={handleNativeTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
-              onClick={togglePlay}
+              onDoubleClick={toggleFullscreen}
               onError={(e) => {
                 // Ignore initial video errors if we are actively transmuxing/streaming
                 if (!isTransmuxing && !isBufferingSegment && !isBackgroundStreaming) {
@@ -934,14 +993,7 @@ export default function VideoPlayer({
               >
                 <Upload size={18} /> Choose Another Video File
               </button>
-              <button
-                className="dropzone-demo-btn"
-                onClick={handleGenerateSampleVideo}
-                disabled={isGeneratingDemo}
-              >
-                <Sparkles size={14} color="#ec4899" />
-                {isGeneratingDemo ? 'Generating Reel...' : 'Test with Demo Reel'}
-              </button>
+
             </div>
           </div>
         )}
@@ -965,14 +1017,7 @@ export default function VideoPlayer({
               <Upload size={18} /> Choose Video File (.mkv, .mp4, .webm)
             </button>
 
-            <button
-              className="dropzone-demo-btn"
-              onClick={handleGenerateSampleVideo}
-              disabled={isGeneratingDemo}
-            >
-              <Sparkles size={14} color="#ec4899" />
-              {isGeneratingDemo ? 'Generating Reel...' : 'Generate Demo Reel (Instant Test)'}
-            </button>
+
           </div>
         )}
 
@@ -1157,6 +1202,7 @@ export default function VideoPlayer({
 
                 {/* Ambient glow toggle */}
                 <button
+                  type="button"
                   className={`ctrl-btn ${ambientGlow ? 'active' : ''}`}
                   onClick={() => setAmbientGlow(!ambientGlow)}
                   title="Ambient Backlight Glow"
@@ -1164,11 +1210,12 @@ export default function VideoPlayer({
                   <Sun size={17} />
                 </button>
 
-                {/* Fullscreen */}
+                {/* Fullscreen (F) */}
                 <button
-                  className="ctrl-btn"
+                  type="button"
+                  className={`ctrl-btn ${isFullscreen ? 'active' : ''}`}
                   onClick={toggleFullscreen}
-                  title="Toggle Fullscreen (F)"
+                  title={isFullscreen ? "Exit Fullscreen (F / Esc)" : "Fullscreen (F)"}
                 >
                   {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
                 </button>
