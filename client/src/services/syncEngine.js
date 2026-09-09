@@ -7,6 +7,7 @@ const ICE_SERVERS = [
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
   {
     urls: [
       'turn:openrelay.metered.ca:80',
@@ -26,6 +27,7 @@ class SyncEngine {
     this.isApplyingRemoteAction = false;
     this.heartbeatTimer = null;
     this.lastKnownDrift = 0;
+    this.iceServers = ICE_SERVERS;
     
     // WebRTC properties
     this.peers = new Map(); // targetId -> RTCPeerConnection
@@ -56,6 +58,19 @@ class SyncEngine {
 
   init(serverUrl = '') {
     if (this.socket) return;
+
+    // Fetch dynamic ICE servers from server (for Render & NAT traversal)
+    fetch('/api/ice-servers')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.iceServers && Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+          this.iceServers = data.iceServers;
+          console.log(`[SyncEngine] 🌐 Loaded ${this.iceServers.length} ICE servers for WebRTC`);
+        }
+      })
+      .catch((err) => {
+        console.warn('[SyncEngine] Could not fetch server ICE config, using defaults:', err.message);
+      });
 
     // Use current origin or default port 3001 in dev
     const targetUrl = serverUrl || (window.location.port === '5173' ? 'http://localhost:3001' : window.location.origin);
@@ -331,6 +346,26 @@ class SyncEngine {
           } else {
             pc.addTrack(audioTrack, this.localAudioStream);
           }
+
+          // Ensure transceiver direction allows sending
+          const transceivers = pc.getTransceivers ? pc.getTransceivers() : [];
+          const audioTransceiver = transceivers.find(t => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
+          if (audioTransceiver && audioTransceiver.direction !== 'sendrecv') {
+            audioTransceiver.direction = 'sendrecv';
+          }
+
+          // Trigger renegotiation so the remote peer receives audio
+          if (pc.signalingState === 'stable') {
+            try {
+              const offer = await pc.createOffer({ offerToReceiveAudio: true });
+              await pc.setLocalDescription(offer);
+              if (this.socket) {
+                this.socket.emit('webrtc_offer', { targetId, offer: pc.localDescription });
+              }
+            } catch (renegErr) {
+              console.warn('[SyncEngine] Audio renegotiation notice:', renegErr);
+            }
+          }
         }
       }
       return this.localAudioStream;
@@ -363,7 +398,12 @@ class SyncEngine {
     return this._createPeerConnection(targetId, isInitiator);
   }
 
-  setMicEnabled(enabled) {
+  async setMicEnabled(enabled) {
+    if (!this.localAudioStream && enabled) {
+      // Lazy-acquire mic on user action if not already acquired
+      await this.acquireLocalMedia();
+    }
+
     if (!this.localAudioStream) {
       console.warn('[SyncEngine] Cannot toggle mic: localAudioStream is not active');
       return false;
@@ -384,7 +424,8 @@ class SyncEngine {
 
     console.log(`[SyncEngine] 🛠️ Creating PeerConnection with ${targetId} (initiator: ${isInitiator})`);
     const pc = new RTCPeerConnection({
-      iceServers: ICE_SERVERS,
+      iceServers: this.iceServers || ICE_SERVERS,
+      iceCandidatePoolSize: 10,
     });
 
     pc.onicecandidate = (event) => {
@@ -404,22 +445,41 @@ class SyncEngine {
       if (pc.connectionState === 'connected') {
         console.log(`[SyncEngine] 🎉 WebRTC Audio Connected with peer ${targetId}!`);
       } else if (pc.connectionState === 'failed') {
-        console.warn(`[SyncEngine] Peer connection failed with ${targetId}`);
+        console.warn(`[SyncEngine] Peer connection failed with ${targetId}, attempting ICE restart...`);
+        if (typeof pc.restartIce === 'function') {
+          pc.restartIce();
+        }
       }
     };
 
     pc.oniceconnectionstatechange = () => {
       console.log(`[SyncEngine] 🧊 Peer ${targetId} iceConnectionState: ${pc.iceConnectionState}`);
+      if (pc.iceConnectionState === 'failed') {
+        console.warn(`[SyncEngine] ⚠️ ICE connection failed for ${targetId}, restarting ICE...`);
+        if (typeof pc.restartIce === 'function') {
+          pc.restartIce();
+        }
+        if (pc.signalingState === 'stable') {
+          pc.createOffer({ iceRestart: true, offerToReceiveAudio: true })
+            .then(offer => pc.setLocalDescription(offer))
+            .then(() => {
+              if (this.socket) {
+                this.socket.emit('webrtc_offer', { targetId, offer: pc.localDescription });
+              }
+            })
+            .catch(err => console.warn('[SyncEngine] ICE restart offer error:', err));
+        }
+      }
     };
 
-    // Attach local audio track if available, else add recvonly transceiver so audio is received
+    // Attach local audio track if available, else add transceiver in sendrecv mode
     if (this.localAudioStream && this.localAudioStream.getAudioTracks().length > 0) {
       this.localAudioStream.getAudioTracks().forEach(track => {
         pc.addTrack(track, this.localAudioStream);
       });
     } else {
       try {
-        pc.addTransceiver('audio', { direction: 'recvonly' });
+        pc.addTransceiver('audio', { direction: 'sendrecv' });
       } catch (err) {
         console.warn('[SyncEngine] addTransceiver error:', err);
       }

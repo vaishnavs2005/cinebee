@@ -1,9 +1,8 @@
 import React, { useEffect, useRef } from 'react';
+import { getPreloadedCatImages, NUM_UNIQUE_CATS } from '../services/assetPreloader';
 
-const NUM_UNIQUE_CATS = 12;
 const COPIES_PER_CAT = 2; // Each head duplicated twice = 24 cats in total
 const TOTAL_CATS = NUM_UNIQUE_CATS * COPIES_PER_CAT;
-const CAT_PATHS = Array.from({ length: NUM_UNIQUE_CATS }, (_, i) => `/emojis/floatable/${i + 1}.png`);
 
 export default function FloatingCatCanvas() {
   const canvasRef = useRef(null);
@@ -17,12 +16,8 @@ export default function FloatingCatCanvas() {
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
 
-    // Preload images
-    const images = CAT_PATHS.map((src) => {
-      const img = new Image();
-      img.src = src;
-      return img;
-    });
+    // Obtain preloaded and decoded cat images
+    const images = getPreloadedCatImages();
 
     // Particle sparks for collisions
     let sparks = [];
@@ -216,9 +211,31 @@ export default function FloatingCatCanvas() {
       }
     }
 
-    computeHomePositions(true);
-    setTimeout(() => computeHomePositions(false), 150);
-    setTimeout(() => computeHomePositions(false), 600);
+    let dropStarted = false;
+    const startEntranceDrop = () => {
+      if (dropStarted) return;
+      dropStarted = true;
+      computeHomePositions(true);
+      setTimeout(() => computeHomePositions(false), 150);
+      setTimeout(() => computeHomePositions(false), 600);
+    };
+
+    const allImagesReady = images.every((img) => img.complete && img.naturalWidth > 0);
+    if (allImagesReady) {
+      startEntranceDrop();
+    } else {
+      images.forEach((img) => {
+        if (!img.complete) {
+          img.addEventListener('load', () => {
+            if (images.every((i) => i.complete && i.naturalWidth > 0)) {
+              startEntranceDrop();
+            }
+          }, { once: true });
+        }
+      });
+      // Safety fallback to guarantee drop starts even if an image fails
+      setTimeout(startEntranceDrop, 800);
+    }
 
     // Mouse tracking state
     const mouse = {
@@ -702,7 +719,9 @@ export default function FloatingCatCanvas() {
         ctx.shadowOffsetX = cat.isDragging ? 5 : 2.5;
         ctx.shadowOffsetY = cat.isDragging ? 7 : 3.5;
 
-        ctx.drawImage(cat.img, -cat.radius, -cat.radius, size, size);
+        if (cat.img && cat.img.complete && cat.img.naturalWidth > 0) {
+          ctx.drawImage(cat.img, -cat.radius, -cat.radius, size, size);
+        }
         ctx.restore();
       }
     }

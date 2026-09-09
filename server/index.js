@@ -445,6 +445,58 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// ICE Servers endpoint for WebRTC NAT traversal (STUN + TURN)
+app.get('/api/ice-servers', async (req, res) => {
+  const iceServers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+  ];
+
+  // If custom TURN URL is provided in environment variables (e.g. on Render)
+  if (process.env.TURN_URL) {
+    const urls = process.env.TURN_URL.split(',').map(u => u.trim());
+    iceServers.push({
+      urls,
+      username: process.env.TURN_USERNAME || '',
+      credential: process.env.TURN_CREDENTIAL || process.env.TURN_PASSWORD || '',
+    });
+  }
+
+  // Metered.ca Turn API integration if API key is provided
+  if (process.env.METERED_API_KEY) {
+    try {
+      const appName = process.env.METERED_APP_NAME || 'meowvie';
+      const response = await fetch(`https://${appName}.metered.ca/api/v1/turn/credentials?apiKey=${process.env.METERED_API_KEY}`);
+      if (response.ok) {
+        const meteredServers = await response.json();
+        if (Array.isArray(meteredServers)) {
+          return res.json({ iceServers: [...iceServers, ...meteredServers] });
+        }
+      }
+    } catch (err) {
+      console.warn('Metered TURN fetch error:', err.message);
+    }
+  }
+
+  // Free OpenRelay TURN servers fallback
+  iceServers.push({
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+    ],
+    username: 'openrelay',
+    credential: 'openrelay',
+  });
+
+  res.json({ iceServers });
+});
+
 // Serve frontend build in production
 const distPath = path.resolve(__dirname, '../dist');
 app.use(express.static(distPath));

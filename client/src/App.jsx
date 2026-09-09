@@ -6,6 +6,7 @@ import SyncStatusBar from './components/SyncStatusBar';
 import RoomModal from './components/RoomModal';
 import FileMismatchModal from './components/FileMismatchModal';
 import InfoModal from './components/InfoModal';
+import AppPreloader from './components/AppPreloader';
 import { syncEngine } from './services/syncEngine';
 
 function formatTime(seconds) {
@@ -52,6 +53,9 @@ function RemoteAudio({ stream, userId }) {
 }
 
 export default function App() {
+  const [isAppReady, setIsAppReady] = useState(false);
+  const [showPreloader, setShowPreloader] = useState(true);
+
   const [roomId, setRoomId] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);
@@ -541,8 +545,19 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Top Navigation Bar */}
-      <Header
+      {/* Full App Asset Preloader (Google Fonts, Brand Logos, 12 Falling Emoji Heads) */}
+      {showPreloader && (
+        <AppPreloader
+          onReady={() => setIsAppReady(true)}
+          onLoaded={() => setShowPreloader(false)}
+        />
+      )}
+
+      {/* Main App Layout - Only mounted once every font, logo, and falling head image is 100% loaded */}
+      {isAppReady && (
+        <>
+          {/* Top Navigation Bar */}
+          <Header
         roomId={roomId}
         currentUser={currentUser}
         usersCount={users.length}
@@ -687,6 +702,8 @@ export default function App() {
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
     </div>
   );
