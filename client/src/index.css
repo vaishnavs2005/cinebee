@@ -1647,6 +1647,19 @@ body {
   font-size: 0.72rem;
   color: var(--text-muted);
 }
+.fs-chat-kbd-hint {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  background: var(--bg-cream-tint);
+  border: 1.5px solid var(--border-olive);
+  border-radius: 4px;
+  color: var(--text-dark);
+  box-shadow: 1px 1px 0px #1A1A1A;
+  margin-left: 4px;
+  user-select: none;
+}
 .fs-chat-close-btn {
   background: transparent;
   border: none;

@@ -29,6 +29,9 @@ export default function FullscreenChatOverlay({
   const inputRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const prevMessagesLengthRef = useRef(messages.length);
+  const ctrlDownRef = useRef(false);
+  const ctrlAccompaniedRef = useRef(false);
+  const ctrlTimeRef = useRef(0);
 
   // Dismiss chat when clicking outside the chat box
   useEffect(() => {
@@ -51,45 +54,25 @@ export default function FullscreenChatOverlay({
   }, [isOpen]);
 
   // Fullscreen Keyboard Shortcuts:
-  // - Pressing 'X' / 'x': Toggles chat open/closed. When opened, immediately places cursor in input field.
+  // - Tapping 'Ctrl' (Control): Opens chat and places cursor in field, OR closes chat even while cursor is in field!
   // - Pressing 'Escape': Closes chat.
   useEffect(() => {
     if (!isFullscreen) return;
 
     const handleKeyDown = (e) => {
-      const activeEl = document.activeElement;
-      const isTyping = activeEl && (
-        activeEl.tagName === 'INPUT' ||
-        activeEl.tagName === 'TEXTAREA' ||
-        activeEl.isContentEditable
-      );
-
-      // Handle 'X' or 'x' key
-      if (e.code === 'KeyX' || e.key === 'x' || e.key === 'X') {
-        // Allow regular typing of the letter 'x' inside inputs
-        if (isTyping) {
-          return;
-        }
-
-        e.preventDefault();
-        e.stopPropagation();
-
-        if (isOpen) {
-          setIsOpen(false);
-        } else {
-          if (toastTimeoutRef.current) {
-            clearTimeout(toastTimeoutRef.current);
-          }
-          setActiveToast(null);
-          setIsOpen(true);
-          setUnreadCount(0);
-
-          // Focus the text input directly so user can immediately type
-          setTimeout(() => {
-            inputRef.current?.focus();
-          }, 30);
+      if (e.key === 'Control') {
+        if (!ctrlDownRef.current) {
+          ctrlDownRef.current = true;
+          ctrlAccompaniedRef.current = false;
+          ctrlTimeRef.current = Date.now();
         }
         return;
+      }
+
+      // If user presses another key while holding Ctrl (e.g. Ctrl+C, Ctrl+V, Ctrl+A),
+      // mark it as accompanied so releasing Ctrl does NOT toggle the chat window
+      if (ctrlDownRef.current) {
+        ctrlAccompaniedRef.current = true;
       }
 
       // Handle Escape key to dismiss chat
@@ -100,8 +83,45 @@ export default function FullscreenChatOverlay({
       }
     };
 
+    const handleKeyUp = (e) => {
+      if (e.key === 'Control') {
+        const wasAccompanied = ctrlAccompaniedRef.current;
+        const duration = Date.now() - ctrlTimeRef.current;
+        ctrlDownRef.current = false;
+        ctrlAccompaniedRef.current = false;
+
+        // Standalone tap of Control (not part of Ctrl+C, Ctrl+V, etc.)
+        if (!wasAccompanied && duration < 800) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (isOpen) {
+            // Even though cursor is in the field, clicking/tapping Control closes it!
+            setIsOpen(false);
+          } else {
+            // Opens chat and places cursor directly in the field
+            if (toastTimeoutRef.current) {
+              clearTimeout(toastTimeoutRef.current);
+            }
+            setActiveToast(null);
+            setIsOpen(true);
+            setUnreadCount(0);
+
+            setTimeout(() => {
+              inputRef.current?.focus();
+            }, 30);
+          }
+        }
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+    };
   }, [isFullscreen, isOpen]);
 
   // Auto-scroll chat messages to bottom
@@ -324,12 +344,13 @@ export default function FullscreenChatOverlay({
               <MessageSquare size={15} color="var(--accent-red)" />
               <span>Party Chat</span>
               <span className="fs-chat-count">({messages.length})</span>
+              <span className="fs-chat-kbd-hint" title="Press Ctrl to close">Ctrl</span>
             </div>
             <button
               type="button"
               className="fs-chat-close-btn"
               onClick={toggleChat}
-              title="Close chat (X / Esc)"
+              title="Close chat (Ctrl / Esc)"
               aria-label="Close chat"
             >
               <X size={18} />
@@ -411,12 +432,12 @@ export default function FullscreenChatOverlay({
               ref={inputRef}
               type="text"
               className="fs-chat-input"
-              placeholder="Reply to partner... (Esc to close)"
+              placeholder="Reply to partner... (Ctrl or Esc to close)"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {
-                e.stopPropagation();
                 if (e.key === 'Escape') {
+                  e.stopPropagation();
                   setIsOpen(false);
                 }
               }}
@@ -440,7 +461,7 @@ export default function FullscreenChatOverlay({
         type="button"
         className={`fullscreen-chat-btn ${isOpen ? 'active' : ''}`}
         onClick={toggleChat}
-        title={isOpen ? "Close Party Chat (X / Esc)" : "Open Party Chat (Press X)"}
+        title={isOpen ? "Close Party Chat (Ctrl / Esc)" : "Open Party Chat (Ctrl)"}
         aria-label="Toggle Party Chat"
       >
         {isOpen ? <X size={22} /> : <MessageSquare size={22} />}
