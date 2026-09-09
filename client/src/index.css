@@ -3000,6 +3000,16 @@ body {
   50% { transform: translateX(-50%) scale(1.04); }
 }
 
+/* In-player / Fullscreen Video Speaker Indicator */
+.video-player-speaker-indicator {
+  position: absolute !important;
+  top: 18px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  z-index: 200 !important;
+  pointer-events: none;
+}
+
 /* Fullscreen Chat Overlay Translucent Theme */
 .fullscreen-chat-drawer {
   background: rgba(250, 242, 230, 0.92) !important;

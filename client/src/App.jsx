@@ -611,6 +611,8 @@ export default function App() {
             toasts={toasts}
             onDismissToast={dismissToast}
             onFullscreenChange={setIsFullscreen}
+            activeSpeakers={activeSpeakers}
+            users={users}
           />
 
           {/* Sync Status & Resync Controls Bar */}
@@ -653,27 +655,11 @@ export default function App() {
         onClose={() => setIsInfoModalOpen(false)}
       />
 
-      {/* Walkie Talkie UI Indicator */}
-      {activeSpeakers.size > 0 && (
-        <div className="walkie-talkie-indicator" style={{
-          position: 'fixed',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: 'rgba(0, 0, 0, 0.8)',
-          color: '#fff',
-          padding: '8px 16px',
-          borderRadius: '20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          zIndex: 9999,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-          border: '1px solid var(--accent-primary)',
-          animation: 'pulse 1.5s infinite',
-        }}>
+      {/* Walkie Talkie UI Indicator (Rendered here when not in fullscreen; fullscreen renders inside VideoPlayer) */}
+      {!isFullscreen && activeSpeakers.size > 0 && (
+        <div className="walkie-talkie-indicator" aria-live="polite">
           <span style={{ fontSize: '1.2rem' }}>🎙️</span>
-          <span style={{ fontWeight: 500 }}>
+          <span>
             {Array.from(activeSpeakers).map(id => {
               if (id === 'local') return 'You';
               const user = users.find(u => u.id === id);

@@ -61,6 +61,8 @@ export default function VideoPlayer({
   toasts = [],
   onDismissToast,
   onFullscreenChange,
+  activeSpeakers,
+  users = [],
 }) {
   const localVideoRef = useRef(null);
   const videoRef = videoRefExternal || localVideoRef;
@@ -824,6 +826,20 @@ export default function VideoPlayer({
                 <span>{toast.text}</span>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Fullscreen Walkie Talkie Speaking Indicator (Shown whenever someone turns on mic/speaks, both playing & paused/not playing) */}
+        {isFullscreen && activeSpeakers && activeSpeakers.size > 0 && (
+          <div className="walkie-talkie-indicator video-player-speaker-indicator" aria-live="polite">
+            <span style={{ fontSize: '1.2rem' }}>🎙️</span>
+            <span>
+              {Array.from(activeSpeakers).map(id => {
+                if (id === 'local') return 'You';
+                const user = users?.find(u => u.id === id);
+                return user ? user.username : 'Someone';
+              }).join(', ')} speaking...
+            </span>
           </div>
         )}
 
