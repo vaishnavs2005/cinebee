@@ -1,9 +1,11 @@
 import express from 'express';
 import http from 'http';
+import https from 'https';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import selfsigned from 'selfsigned';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,12 +13,29 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
 
+// Self-signed certificate for local HTTPS (enables microphone / getUserMedia across LAN devices)
+let httpsServer = null;
+try {
+  const pems = await selfsigned.generate(
+    [
+      { name: 'commonName', value: 'meowvie.local' },
+      { name: 'organizationName', value: 'Meowvie' },
+    ],
+    { days: 365 }
+  );
+  httpsServer = https.createServer({ key: pems.private, cert: pems.cert }, app);
+  console.log('🔒 Generated in-memory SSL certificate for secure LAN voice chat');
+} catch (sslErr) {
+  console.warn('⚠️ Could not generate self-signed certificate for HTTPS:', sslErr.message);
+}
+
 const PORT = process.env.PORT || 3001;
+const HTTPS_PORT = process.env.HTTPS_PORT || (Number(PORT) + 1);
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Socket.io configuration
+// Socket.io configuration supporting both HTTP and HTTPS
 const io = new Server(server, {
   cors: {
     origin: '*',
@@ -24,7 +43,12 @@ const io = new Server(server, {
   },
   pingInterval: 10000,
   pingTimeout: 5000,
+  maxHttpBufferSize: 1e6, // 1MB buffer for audio chunks
 });
+
+if (httpsServer) {
+  io.attach(httpsServer);
+}
 
 // Rooms State
 // Map<roomId, { users: Map<socketId, { username, isHost, fileInfo, joinedAt }>, playback: { playing, time, updatedAt, lastActionBy }, mode: 'co-op' | 'host-only', messages: [] }>
@@ -363,6 +387,17 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Bulletproof Socket.IO Voice Audio Relay (ensures audio transmission across LAN / Wi-Fi routers)
+  socket.on('voice_audio_chunk', ({ roomId, chunk, sampleRate }) => {
+    const cleanRoomId = (roomId || currentRoomId)?.trim().toLowerCase();
+    if (!cleanRoomId || !chunk) return;
+    socket.to(cleanRoomId).emit('voice_audio_chunk', {
+      senderId: socket.id,
+      chunk,
+      sampleRate: sampleRate || 48000,
+    });
+  });
+
   // Emoji Reactions
   socket.on('reaction', ({ roomId, emoji }) => {
     const cleanRoomId = (roomId || currentRoomId)?.trim().toLowerCase();
@@ -511,5 +546,11 @@ app.get('*', (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🍿 Meowvie server listening on port ${PORT}`);
+  console.log(`🍿 Meowvie HTTP server listening on port ${PORT}`);
 });
+
+if (httpsServer) {
+  httpsServer.listen(HTTPS_PORT, () => {
+    console.log(`🔒 Meowvie HTTPS server (Microphone / Secure Context enabled) listening on port ${HTTPS_PORT}`);
+  });
+}

@@ -36,6 +36,17 @@ class SyncEngine {
     this.isVoiceChatStarted = false;
     this.hasMicPermission = false;
 
+    // Dual-Engine Voice Audio properties (Socket.IO Relay + WebRTC)
+    this.isMicActive = false;
+    this.captureCtx = null;
+    this.playbackCtx = null;
+    this.mediaSource = null;
+    this.processorNode = null;
+    this.dummyGain = null;
+    this._isRelayCapturing = false;
+    this.peerNextPlayTime = {};
+    this.activeRtcAudioReceivers = new Set();
+
     this.callbacks = {
       onConnect: () => {},
       onDisconnect: () => {},
@@ -53,6 +64,7 @@ class SyncEngine {
       onVoiceStart: () => {},
       onVoiceEnd: () => {},
       onVoiceStream: () => {},
+      onVoiceNotice: () => {},
     };
   }
 
@@ -215,6 +227,20 @@ class SyncEngine {
     this.socket.on('voice_end', ({ senderId }) => {
       this.callbacks.onVoiceEnd(senderId);
     });
+
+    // Dual-Engine: Socket.IO Voice Audio Chunk Relay
+    this.socket.on('voice_audio_chunk', ({ senderId, chunk, sampleRate }) => {
+      if (!this.socket || senderId === this.socket.id) return;
+
+      // If WebRTC direct peer audio is actively flowing, skip socket relay to avoid duplicate sound
+      const pc = this.peers.get(senderId);
+      const isRtcActive = pc && pc.connectionState === 'connected' && this.activeRtcAudioReceivers.has(senderId);
+      if (isRtcActive) {
+        return;
+      }
+
+      this._playVoiceChunk(senderId, chunk, sampleRate);
+    });
   }
 
   setCallbacks(cbs) {
@@ -318,10 +344,56 @@ class SyncEngine {
     }
   }
 
-  // --- WebRTC Voice Chat Methods ---
+  // Context Security & Media Support Helpers
+  isSecureContext() {
+    return Boolean(
+      window.isSecureContext ||
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1'
+    );
+  }
+
+  hasMediaDeviceSupport() {
+    return Boolean(
+      typeof navigator !== 'undefined' &&
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getUserMedia === 'function'
+    );
+  }
+
+  getHttpsSwitchUrl() {
+    const currentPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+    const httpsPort = currentPort === '3001' ? '3002' : (currentPort === '80' || !currentPort ? '3002' : '3002');
+    return `https://${window.location.hostname}:${httpsPort}${window.location.pathname}${window.location.search}`;
+  }
+
+  resumeAudio() {
+    if (this.playbackCtx && this.playbackCtx.state === 'suspended') {
+      this.playbackCtx.resume().catch(() => {});
+    }
+    if (this.captureCtx && this.captureCtx.state === 'suspended') {
+      this.captureCtx.resume().catch(() => {});
+    }
+  }
+
+  // --- Voice Chat & Audio Streaming Methods ---
 
   async acquireLocalMedia() {
     if (this.localAudioStream) return this.localAudioStream;
+
+    // Check secure context and getUserMedia support
+    if (!this.hasMediaDeviceSupport()) {
+      const isSecure = this.isSecureContext();
+      console.warn(`[SyncEngine] Microphone is not available. Secure context: ${isSecure}`);
+      this.hasMicPermission = false;
+      this.callbacks.onVoiceNotice({
+        type: 'unsupported_context',
+        isSecure,
+        httpsUrl: this.getHttpsSwitchUrl(),
+      });
+      return null;
+    }
+
     try {
       this.localAudioStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -335,6 +407,9 @@ class SyncEngine {
         track.enabled = false;
       });
       this.hasMicPermission = true;
+
+      // Start capture pipeline for bulletproof Socket.IO relay
+      this._startVoiceStreaming();
 
       // Attach track to all existing active peer connections
       const audioTrack = this.localAudioStream.getAudioTracks()[0];
@@ -372,6 +447,10 @@ class SyncEngine {
     } catch (err) {
       console.warn('[SyncEngine] Microphone permission not granted or unavailable:', err);
       this.hasMicPermission = false;
+      this.callbacks.onVoiceNotice({
+        type: 'permission_denied',
+        error: err.message,
+      });
       return null;
     }
   }
@@ -380,7 +459,7 @@ class SyncEngine {
     if (!this.socket) return;
     this.isVoiceChatStarted = true;
 
-    // Try to acquire mic early (starts muted). If denied, user can still hear others in recvonly mode.
+    // Try to acquire mic early (starts muted). If denied or insecure context, user can still hear others
     await this.acquireLocalMedia();
 
     // Connect to all existing users in the room
@@ -399,6 +478,8 @@ class SyncEngine {
   }
 
   async setMicEnabled(enabled) {
+    this.resumeAudio();
+
     if (!this.localAudioStream && enabled) {
       // Lazy-acquire mic on user action if not already acquired
       await this.acquireLocalMedia();
@@ -406,17 +487,124 @@ class SyncEngine {
 
     if (!this.localAudioStream) {
       console.warn('[SyncEngine] Cannot toggle mic: localAudioStream is not active');
+      if (!this.hasMediaDeviceSupport()) {
+        this.callbacks.onVoiceNotice({
+          type: 'unsupported_context',
+          isSecure: this.isSecureContext(),
+          httpsUrl: this.getHttpsSwitchUrl(),
+        });
+      }
       return false;
     }
+
+    this.isMicActive = Boolean(enabled);
     this.localAudioStream.getAudioTracks().forEach(track => {
       track.enabled = Boolean(enabled);
     });
+
+    if (this.isMicActive) {
+      this._startVoiceStreaming();
+    }
+
     console.log(`[SyncEngine] 🎤 Microphone ${enabled ? 'ENABLED' : 'MUTED'}`);
 
     if (this.socket && this.roomId) {
       this.socket.emit(enabled ? 'voice_start' : 'voice_end', { roomId: this.roomId });
     }
     return true;
+  }
+
+  _startVoiceStreaming() {
+    if (this._isRelayCapturing || !this.localAudioStream) return;
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!this.captureCtx) {
+        this.captureCtx = new AudioCtx();
+      }
+      if (this.captureCtx.state === 'suspended') {
+        this.captureCtx.resume().catch(() => {});
+      }
+
+      this.mediaSource = this.captureCtx.createMediaStreamSource(this.localAudioStream);
+      // 2048 samples at ~48kHz gives ~42ms audio frames for instantaneous voice transmission
+      this.processorNode = this.captureCtx.createScriptProcessor(2048, 1, 1);
+
+      this.dummyGain = this.captureCtx.createGain();
+      this.dummyGain.gain.value = 0;
+
+      this.processorNode.onaudioprocess = (e) => {
+        if (!this.isMicActive || !this.socket || !this.roomId) return;
+        const channelData = e.inputBuffer.getChannelData(0);
+        const len = channelData.length;
+
+        // Convert Float32 (-1..1) to Int16 PCM for 50% payload compression and zero overhead
+        let peak = 0;
+        const pcmData = new Int16Array(len);
+        for (let i = 0; i < len; i++) {
+          const s = Math.max(-1, Math.min(1, channelData[i]));
+          pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          const abs = Math.abs(s);
+          if (abs > peak) peak = abs;
+        }
+
+        // Noise gate: only send when actual voice/sound is present (> 0.003)
+        if (peak > 0.003) {
+          this.socket.emit('voice_audio_chunk', {
+            roomId: this.roomId,
+            chunk: pcmData.buffer,
+            sampleRate: this.captureCtx.sampleRate || 48000,
+          });
+        }
+      };
+
+      this.mediaSource.connect(this.processorNode);
+      this.processorNode.connect(this.dummyGain);
+      this.dummyGain.connect(this.captureCtx.destination);
+      this._isRelayCapturing = true;
+      console.log('[SyncEngine] 🎙️ Audio chunk relay capture pipeline started');
+    } catch (err) {
+      console.warn('[SyncEngine] Voice streaming capture warning:', err);
+    }
+  }
+
+  _playVoiceChunk(senderId, chunk, sampleRate) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!this.playbackCtx) {
+        this.playbackCtx = new AudioCtx();
+      }
+      if (this.playbackCtx.state === 'suspended') {
+        this.playbackCtx.resume().catch(() => {});
+      }
+
+      const int16 = new Int16Array(chunk);
+      if (int16.length === 0) return;
+
+      const float32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) {
+        float32[i] = int16[i] / (int16[i] < 0 ? 0x8000 : 0x7FFF);
+      }
+
+      const effectiveRate = sampleRate || this.playbackCtx.sampleRate || 48000;
+      const audioBuffer = this.playbackCtx.createBuffer(1, float32.length, effectiveRate);
+      audioBuffer.copyToChannel(float32, 0);
+
+      const source = this.playbackCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this.playbackCtx.destination);
+
+      const now = this.playbackCtx.currentTime;
+      if (!this.peerNextPlayTime[senderId] || this.peerNextPlayTime[senderId] < now) {
+        this.peerNextPlayTime[senderId] = now + 0.025; // 25ms small jitter buffer for smooth playback
+      }
+
+      source.start(this.peerNextPlayTime[senderId]);
+      this.peerNextPlayTime[senderId] += audioBuffer.duration;
+    } catch (err) {
+      console.warn('[SyncEngine] Error playing voice chunk:', err);
+    }
   }
 
   _createPeerConnection(targetId, isInitiator) {
@@ -437,6 +625,23 @@ class SyncEngine {
     pc.ontrack = (event) => {
       console.log(`[SyncEngine] 🎧 Received remote audio track from ${targetId}`, event);
       const stream = (event.streams && event.streams[0]) || new MediaStream([event.track]);
+      
+      const audioTrack = event.track;
+      if (audioTrack) {
+        audioTrack.onunmute = () => {
+          this.activeRtcAudioReceivers.add(targetId);
+        };
+        audioTrack.onmute = () => {
+          this.activeRtcAudioReceivers.delete(targetId);
+        };
+        audioTrack.onended = () => {
+          this.activeRtcAudioReceivers.delete(targetId);
+        };
+        if (!audioTrack.muted) {
+          this.activeRtcAudioReceivers.add(targetId);
+        }
+      }
+
       this.callbacks.onVoiceStream(targetId, stream);
     };
 
@@ -444,10 +649,13 @@ class SyncEngine {
       console.log(`[SyncEngine] 📡 Peer ${targetId} connectionState: ${pc.connectionState}`);
       if (pc.connectionState === 'connected') {
         console.log(`[SyncEngine] 🎉 WebRTC Audio Connected with peer ${targetId}!`);
-      } else if (pc.connectionState === 'failed') {
-        console.warn(`[SyncEngine] Peer connection failed with ${targetId}, attempting ICE restart...`);
-        if (typeof pc.restartIce === 'function') {
-          pc.restartIce();
+      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+        this.activeRtcAudioReceivers.delete(targetId);
+        if (pc.connectionState === 'failed') {
+          console.warn(`[SyncEngine] Peer connection failed with ${targetId}, attempting ICE restart...`);
+          if (typeof pc.restartIce === 'function') {
+            pc.restartIce();
+          }
         }
       }
     };
@@ -532,9 +740,30 @@ class SyncEngine {
 
   cleanupVoiceChat() {
     this.isVoiceChatStarted = false;
+    this.isMicActive = false;
+    this._isRelayCapturing = false;
+    this.peerNextPlayTime = {};
+    this.activeRtcAudioReceivers.clear();
+
     if (this.localAudioStream) {
       this.localAudioStream.getTracks().forEach(track => track.stop());
       this.localAudioStream = null;
+    }
+    if (this.processorNode) {
+      try { this.processorNode.disconnect(); } catch (e) {}
+      this.processorNode = null;
+    }
+    if (this.mediaSource) {
+      try { this.mediaSource.disconnect(); } catch (e) {}
+      this.mediaSource = null;
+    }
+    if (this.captureCtx) {
+      try { this.captureCtx.close(); } catch (e) {}
+      this.captureCtx = null;
+    }
+    if (this.playbackCtx) {
+      try { this.playbackCtx.close(); } catch (e) {}
+      this.playbackCtx = null;
     }
     for (const [targetId, pc] of this.peers.entries()) {
       try {

@@ -109,19 +109,26 @@ function waitForServer(port, timeoutMs = 15000) {
 
 function printBanner(port) {
   const networkIps = getNetworkIps();
+  const httpsPort = port + 1;
   const localUrl = `http://localhost:${port}`;
+  const localHttpsUrl = `https://localhost:${httpsPort}`;
 
   console.log('\n=============================================================');
-  console.log('   🐝  Meowvie Local Host is LIVE');
+  console.log('   🍿  Meowvie Local Host is LIVE');
   console.log('=============================================================');
-  console.log(`   ➜ Local:    \x1b[36m${localUrl}\x1b[0m`);
+  console.log(`   ➜ Local:    \x1b[36m${localUrl}\x1b[0m (or \x1b[36m${localHttpsUrl}\x1b[0m)`);
   if (networkIps.length > 0) {
     networkIps.forEach(ip => {
-      console.log(`   ➜ Network:  \x1b[36mhttp://${ip}:${port}\x1b[0m`);
+      console.log(`   ➜ Network (Standard):      \x1b[36mhttp://${ip}:${port}\x1b[0m`);
+      console.log(`   ➜ Network (🎙️ Voice Chat): \x1b[32mhttps://${ip}:${httpsPort}\x1b[0m`);
     });
   }
   console.log('-------------------------------------------------------------');
-  console.log('   💡 Share the Network URL with devices on the same Wi-Fi!');
+  console.log('   💡 VOICE CHAT ACROSS 2 SYSTEMS IN THE SAME ROOM:');
+  console.log('      Modern browsers block microphone on local network IPs over HTTP.');
+  console.log('      To enable voice chat on the 2nd system, open the \x1b[32mHTTPS link\x1b[0m above!');
+  console.log('      (When your browser shows a certificate warning, click');
+  console.log('       "Advanced" -> "Proceed" to grant secure microphone permissions)');
   console.log('   🛑 Press Ctrl + C at any time to stop.');
   console.log('=============================================================\n');
 }

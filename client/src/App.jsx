@@ -50,7 +50,7 @@ function RemoteAudio({ stream, userId }) {
     playStream();
   }, [stream, userId]);
 
-  return <audio ref={audioRef} autoPlay playsInline style={{ display: 'none' }} />;
+  return <audio ref={audioRef} autoPlay playsInline style={{ position: 'fixed', top: -9999, left: -9999, width: 1, height: 1, opacity: 0.001, pointerEvents: 'none' }} />;
 }
 
 export default function App() {
@@ -81,6 +81,7 @@ export default function App() {
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [insecureContextNotice, setInsecureContextNotice] = useState(null);
 
   // Walkie-Talkie State
   const [activeSpeakers, setActiveSpeakers] = useState(new Set());
@@ -311,6 +312,13 @@ export default function App() {
       onVoiceStream: (senderId, stream) => {
         setPeerStreams(prev => ({ ...prev, [senderId]: stream }));
       },
+      onVoiceNotice: (notice) => {
+        if (notice.type === 'unsupported_context') {
+          setInsecureContextNotice(notice.httpsUrl);
+        } else if (notice.type === 'permission_denied') {
+          showToast('Microphone permission was denied by browser settings.');
+        }
+      },
     });
 
     // Provide local state on peer resync request
@@ -320,6 +328,20 @@ export default function App() {
         time: videoRef.current.currentTime,
         playing: !videoRef.current.paused,
       };
+    };
+
+    // Global user gesture listener to unlock Web Audio API and voice playback
+    const unlockAudio = () => {
+      syncEngine.resumeAudio();
+    };
+    window.addEventListener('click', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio, { passive: true });
+    window.addEventListener('touchstart', unlockAudio, { passive: true });
+
+    return () => {
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
     };
   }, [showToast]);
 
@@ -391,12 +413,19 @@ export default function App() {
     if (!roomId) return;
     if (voiceModeRef.current !== 'ptt') return;
     if (!isMicActiveRef.current) {
+      if (!syncEngine.hasMediaDeviceSupport()) {
+        const switchUrl = syncEngine.getHttpsSwitchUrl();
+        setInsecureContextNotice(switchUrl);
+        showToast('🔒 Microphone requires HTTPS on network devices.');
+        return;
+      }
+
       isMicActiveRef.current = true;
       try {
         if (!syncEngine.localAudioStream) {
           await syncEngine.acquireLocalMedia();
         }
-        const ok = syncEngine.setMicEnabled(true);
+        const ok = await syncEngine.setMicEnabled(true);
         if (ok) {
           setActiveSpeakers(prev => new Set([...prev, 'local']));
         } else {
@@ -449,10 +478,17 @@ export default function App() {
     const nextState = !isOpenMicActive;
     try {
       if (nextState) {
+        if (!syncEngine.hasMediaDeviceSupport()) {
+          const switchUrl = syncEngine.getHttpsSwitchUrl();
+          setInsecureContextNotice(switchUrl);
+          showToast('🔒 Microphone requires HTTPS on network devices.');
+          return;
+        }
+
         if (!syncEngine.localAudioStream) {
           await syncEngine.acquireLocalMedia();
         }
-        const ok = syncEngine.setMicEnabled(true);
+        const ok = await syncEngine.setMicEnabled(true);
         if (ok) {
           setActiveSpeakers(prev => new Set([...prev, 'local']));
           setIsOpenMicActive(true);
@@ -498,6 +534,11 @@ export default function App() {
           playing: !videoRef.current.paused,
         };
       });
+
+      // Check if context is insecure on LAN, and alert user with switch link
+      if (!syncEngine.isSecureContext() && !syncEngine.hasMediaDeviceSupport()) {
+        setInsecureContextNotice(syncEngine.getHttpsSwitchUrl());
+      }
 
       // Initialize voice chat connection with users in the room
       syncEngine.initVoiceChat(response.users).catch(err => {
@@ -700,6 +741,33 @@ export default function App() {
       {Object.entries(peerStreams).map(([userId, stream]) => (
         <RemoteAudio key={userId} userId={userId} stream={stream} />
       ))}
+
+      {/* Insecure Context (HTTP on LAN) Voice Chat Notice */}
+      {insecureContextNotice && (
+        <div className="insecure-context-banner" role="alert">
+          <div className="insecure-context-content">
+            <span className="insecure-icon">🎙️</span>
+            <div className="insecure-text">
+              <strong>Microphone Notice:</strong> Browsers block microphone access on local network IPs over HTTP. To speak with your partner from this laptop, switch to the secure HTTPS link.
+            </div>
+            <div className="insecure-actions">
+              <button
+                className="btn-switch-https"
+                onClick={() => { window.location.href = insecureContextNotice; }}
+              >
+                Switch to Secure Mode (HTTPS) ➜
+              </button>
+              <button
+                className="btn-dismiss-notice"
+                onClick={() => setInsecureContextNotice(null)}
+                title="Dismiss notice"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notifications (Standard non-fullscreen view; fullscreen toasts render inside VideoPlayer) */}
       {!isFullscreen && (
