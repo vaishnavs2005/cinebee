@@ -32,6 +32,31 @@ export default function FullscreenChatOverlay({
   const ctrlDownRef = useRef(false);
   const ctrlAccompaniedRef = useRef(false);
   const ctrlTimeRef = useRef(0);
+  const recentSentRef = useRef(new Set());
+
+  // Helper to reliably identify if a message was sent by the current local user
+  const isMessageFromMe = useCallback(
+    (msg) => {
+      if (!msg) return false;
+      if (currentUser) {
+        if (msg.senderId && currentUser.id && String(msg.senderId) === String(currentUser.id)) {
+          return true;
+        }
+        if (
+          msg.sender &&
+          currentUser.username &&
+          msg.sender.trim().toLowerCase() === currentUser.username.trim().toLowerCase()
+        ) {
+          return true;
+        }
+      }
+      if (msg.text && recentSentRef.current.has(msg.text)) {
+        return true;
+      }
+      return false;
+    },
+    [currentUser]
+  );
 
   // Dismiss chat when clicking outside the chat box
   useEffect(() => {
@@ -142,25 +167,48 @@ export default function FullscreenChatOverlay({
     if (messages.length > prevMessagesLengthRef.current) {
       const latestMsg = messages[messages.length - 1];
 
-      if (!isOpen) {
-        setUnreadCount((prev) => prev + 1);
+      const isMine = isMessageFromMe(latestMsg);
+      const isSystem = latestMsg?.sender === 'System' || latestMsg?.id?.toString().startsWith('sys_');
 
-        // Show translucent toast if chat is closed
+      // CRITICAL: Only messages sent by the OTHER person trigger preview toasts and unread counter.
+      // Messages sent by this user or system notifications must NEVER pop up.
+      if (!isMine && !isSystem) {
+        if (!isOpen) {
+          setUnreadCount((prev) => prev + 1);
+
+          // Show translucent toast if chat is closed
+          if (toastTimeoutRef.current) {
+            clearTimeout(toastTimeoutRef.current);
+          }
+
+          setActiveToast(latestMsg);
+
+          // Disappear after 5 seconds as specified
+          toastTimeoutRef.current = setTimeout(() => {
+            setActiveToast(null);
+          }, 5000);
+        }
+      } else if (isMine) {
+        // If our own message arrives while a toast was showing, clear it immediately
         if (toastTimeoutRef.current) {
           clearTimeout(toastTimeoutRef.current);
         }
-
-        setActiveToast(latestMsg);
-
-        // Disappear after 5 seconds as specified
-        toastTimeoutRef.current = setTimeout(() => {
-          setActiveToast(null);
-        }, 5000);
+        setActiveToast(null);
       }
     }
 
     prevMessagesLengthRef.current = messages.length;
-  }, [messages, isOpen, isFullscreen]);
+  }, [messages, isOpen, isFullscreen, isMessageFromMe]);
+
+  // Dismiss any activeToast if it ever matches the current user
+  useEffect(() => {
+    if (activeToast && isMessageFromMe(activeToast)) {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+      setActiveToast(null);
+    }
+  }, [activeToast, isMessageFromMe]);
 
   // Clean up timer on unmount or fullscreen change
   useEffect(() => {
@@ -216,9 +264,18 @@ export default function FullscreenChatOverlay({
 
   const handleSend = (e) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
+    const textToSend = inputText.trim();
+    if (!textToSend) return;
+
+    // Track recently sent message so it never triggers a toast if user instantly closes the chat
+    recentSentRef.current.add(textToSend);
+    if (recentSentRef.current.size > 50) {
+      const first = recentSentRef.current.values().next().value;
+      recentSentRef.current.delete(first);
+    }
+
     if (onSendMessage) {
-      onSendMessage(inputText.trim());
+      onSendMessage(textToSend);
     }
     setInputText('');
   };
@@ -366,7 +423,7 @@ export default function FullscreenChatOverlay({
               </div>
             ) : (
               messages.map((msg) => {
-                const isMine = currentUser && (msg.senderId === currentUser.id || msg.sender === currentUser.username);
+                const isMine = isMessageFromMe(msg);
                 return (
                   <div
                     key={msg.id}

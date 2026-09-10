@@ -845,7 +845,21 @@ export default function VideoPlayer({
 
         {/* Top Header Bar inside Video Player */}
         {videoSrc && !videoError && (
-          <div className={`player-top-bar ${controlsVisible || !isPlaying ? 'visible' : ''}`}>
+          <div
+            className={`player-top-bar ${controlsVisible || !isPlaying ? 'visible' : ''}`}
+            onMouseEnter={() => {
+              isHoveringControlsRef.current = true;
+              if (hideControlsTimerRef.current) {
+                clearTimeout(hideControlsTimerRef.current);
+                hideControlsTimerRef.current = null;
+              }
+              setControlsVisible(true);
+            }}
+            onMouseLeave={() => {
+              isHoveringControlsRef.current = false;
+              resetControlsTimer();
+            }}
+          >
             <div className="player-file-info">
               <Film size={15} color="#ff2a6d" />
               <span className="player-file-name" title={videoName}>{videoName}</span>
